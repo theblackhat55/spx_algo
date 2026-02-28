@@ -1,0 +1,76 @@
+# Paper Trade Configuration
+# config/paper_trade_config.yaml
+# ================================
+# Phase 6 paper-trading settings.
+# Override any value via environment variable (e.g., IBKR_PORT=7496).
+#
+# Usage:
+#   from src.execution.broker import IBKRBroker
+#   broker = IBKRBroker.from_config("config/paper_trade_config.yaml")
+
+# ── IBKR Connection ──────────────────────────────────────────────────────────
+ibkr:
+  host:       "127.0.0.1"
+  port:       7497          # TWS Paper: 7497 | IB Gateway Paper: 4002
+  client_id:  1
+  timeout_s:  30
+  readonly:   false         # Must be false to place orders
+
+# ── Execution mode ───────────────────────────────────────────────────────────
+execution:
+  mode:       "PAPER"       # PAPER | LIVE  (LIVE requires explicit override)
+  dry_run:    false         # true = log order but never submit to IBKR
+
+# ── Position sizing ──────────────────────────────────────────────────────────
+position:
+  max_condors_per_day:  1
+  contracts_per_condor: 1
+  wing_width_pts:       50.0
+  slippage_per_leg:     0.10   # $0.10 per leg → $0.40 total
+
+# ── Regime gate ──────────────────────────────────────────────────────────────
+regime_gate:
+  week_1_to_14:         "GREEN_ONLY"   # First 2 weeks: GREEN only
+  week_15_plus:         "HALF_SIZE_YELLOW"  # Then add YELLOW at 50% size
+  never_trade:          ["RED"]
+
+# ── Risk management ──────────────────────────────────────────────────────────
+risk:
+  stop_loss_multiplier: 2.0    # Close at 2× credit received
+  profit_target_pct:    0.50   # Close at 50% of max credit
+  min_account_buffer:   5000   # Min buying-power buffer ($)
+  margin_per_condor:    1000   # Estimated Reg-T margin per 10-pt wing condor ($)
+
+# ── Alert channels ───────────────────────────────────────────────────────────
+alerts:
+  discord_webhook_url:  ""    # Set in .env: DISCORD_WEBHOOK_URL
+  telegram_bot_token:   ""    # Set in .env: TELEGRAM_BOT_TOKEN
+  telegram_chat_id:     ""    # Set in .env: TELEGRAM_CHAT_ID
+  email_to:             ""    # Set in .env: ALERT_EMAIL_TO
+  alert_on_degraded:    true
+  alert_on_signal:      true
+  alert_on_reconcile:   true
+
+# ── Monitoring ───────────────────────────────────────────────────────────────
+monitoring:
+  drift_window_days:    21
+  mae_yellow_pct:       0.005  # 0.5%
+  mae_red_pct:          0.007  # 0.7%
+  coverage_floor:       0.55
+  consecutive_loss_limit: 5
+
+# ── Data paths ───────────────────────────────────────────────────────────────
+paths:
+  raw_data_dir:         "data/raw"
+  processed_data_dir:   "data/processed"
+  signal_output_dir:    "output/signals"
+  trade_log_path:       "output/trades/paper_trade_log.csv"
+  drift_log_path:       "output/monitoring/drift_log.csv"
+  report_dir:           "output/reports"
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler:
+  signal_time_et:       "16:05"   # Generate today's signal (after close)
+  deadline_time_et:     "16:30"   # Dead-man's switch fires if no signal by now
+  reconcile_time_et:    "10:00"   # Morning reconciliation
+  weekly_digest_day:    "Friday"

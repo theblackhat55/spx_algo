@@ -1,0 +1,31 @@
+services:
+  algo:
+    build: .
+    container_name: spx_algo
+    volumes:
+      - ./data:/app/data          # persist raw + processed Parquet files
+      - ./output:/app/output      # persist signals, models, trade logs
+    env_file:
+      - .env
+    restart: unless-stopped
+    # Override to run a one-shot signal generation
+    # docker compose run algo python -m src.pipeline.signal_generator
+
+  scheduler:
+    build: .
+    container_name: spx_scheduler
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+    env_file:
+      - .env
+    depends_on:
+      - algo
+    restart: unless-stopped
+    command: ["python", "-m", "src.pipeline.scheduler"]
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import os,time,sys; f='output/signals/latest_signal.json'; sys.exit(0 if os.path.exists(f) and (time.time()-os.path.getmtime(f))<90000 else 1)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3

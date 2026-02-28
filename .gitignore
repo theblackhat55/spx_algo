@@ -1,0 +1,57 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# ── Data (never commit raw market data) ──────────────────────────────────────
+data/raw/*.parquet
+data/raw/*.csv
+data/processed/*.parquet
+data/external/
+
+# ── Secrets & credentials ─────────────────────────────────────────────────────
+.env
+*.key
+*.pem
+secrets/
+
+# ── Outputs (generated at runtime) ───────────────────────────────────────────
+output/signals/
+output/trades/
+output/monitoring/
+output/reports/
+output/models/
+
+# ── Jupyter checkpoints ───────────────────────────────────────────────────────
+.ipynb_checkpoints/
+notebooks/*_executed.ipynb
+
+# ── Test & coverage artefacts ─────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ── IDEs ──────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Compiled distributions ────────────────────────────────────────────────────
+*.zip
+*.tar.gz
