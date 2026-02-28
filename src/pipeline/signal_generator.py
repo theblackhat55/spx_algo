@@ -777,6 +777,19 @@ class SignalGenerator:
 
     @staticmethod
     def _next_trading_day(last_date: pd.Timestamp) -> str:
-        """Return the next business day as YYYY-MM-DD string."""
-        from pandas.tseries.offsets import BDay
-        return (last_date + BDay(1)).strftime("%Y-%m-%d")
+        """Return the next *market* trading day as YYYY-MM-DD string.
+
+        FIX Issue 1: pandas BDay does not exclude NYSE holidays.
+        Reuses _us_market_holidays() from live_fetcher.py — same
+        source as the broker.py (B2) and runner.py (N2) fixes.
+        """
+        from datetime import timedelta
+        from src.data.live_fetcher import _us_market_holidays
+        target = last_date.date() + timedelta(days=1)
+        while True:
+            while target.weekday() >= 5:
+                target += timedelta(days=1)
+            if target not in _us_market_holidays(target.year):
+                break
+            target += timedelta(days=1)
+        return target.strftime("%Y-%m-%d")

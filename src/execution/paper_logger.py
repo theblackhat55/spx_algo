@@ -93,8 +93,15 @@ class PaperTradeLogger:
         row = {col: "" for col in LOG_COLUMNS}
         row.update({
             "date":                str(date_str),
-            "predicted_high":      signal.get("predicted_high_pct", "") or signal.get("pred_high_pct", ""),
-            "predicted_low":       signal.get("predicted_low_pct",  "") or signal.get("pred_low_pct",  ""),
+            # FIX Issue 3: prefer absolute price (predicted_high/predicted_low from FullSignal)
+            # over percentage deviation (pred_high_pct). Percentage stored here causes
+            # log_outcome to compute |5050 - 0.005| ≈ 5050 MAE, corrupting drift metrics.
+            "predicted_high":      (signal.get("predicted_high") or
+                                    signal.get("predicted_high_pct", "") or
+                                    signal.get("pred_high_pct", "")),
+            "predicted_low":       (signal.get("predicted_low") or
+                                    signal.get("predicted_low_pct",  "") or
+                                    signal.get("pred_low_pct",  "")),
             "predicted_direction": signal.get("direction", ""),
             "regime":              signal.get("regime", ""),
             # FIX Bug N5: FullSignal uses ic_short_call/ic_long_call etc.; DailySignal uses call_strike/put_strike.
@@ -148,9 +155,13 @@ class PaperTradeLogger:
         low_err   = abs(actual_low  - pred_low)  if not np.isnan(pred_low)  else np.nan
 
         dir_correct = (
-            bool((pred_dir == "UP" and actual_close > _f("predicted_low")) or
-                 (pred_dir == "DOWN" and actual_close < _f("predicted_high")))
-            if pred_dir else np.nan
+            # FIX Issue 2: FullSignal.direction is BULLISH/BEARISH/NEUTRAL, not UP/DOWN.
+            # Directional accuracy = did close move in the predicted direction from prior close?
+            bool(
+                (pred_dir in ("BULLISH", "UP")   and actual_close > _f("prior_close")) or
+                (pred_dir in ("BEARISH", "DOWN")  and actual_close < _f("prior_close"))
+            )
+            if pred_dir and pred_dir not in ("NEUTRAL", "") else np.nan
         )
 
         # Condor result: win if both short strikes unbreached
@@ -195,7 +206,9 @@ class PaperTradeLogger:
                 # Cap each leg intrusion at wing width (max loss per leg = wing_width - credit)
                 long_call = _f("long_call_strike")
                 long_put  = _f("long_put_strike")
-                wing_width = 20.0   # default 20-pt wing
+                # FIX Issue 5: hard-coded 20.0 pt fallback understates max loss vs actual
+                # 50.0 pt wings from signal_generator / paper_trade_config.yaml.
+                wing_width = 50.0   # matches wing_width_pts in config/paper_trade_config.yaml
                 if not np.isnan(long_call) and long_call > call_k:
                     wing_width = min(wing_width, long_call - call_k)
                 if not np.isnan(long_put) and long_put < put_k:
