@@ -20,8 +20,8 @@ Usage
     from src.execution.broker import IBKRBroker, build_condor_from_signal
     broker = IBKRBroker(paper=True)
     broker.connect()
-    contract, order = build_condor_from_signal(signal, broker)
-    trade = broker.place_condor_order(contract, order)
+    contract, n_contracts, credit_limit = build_condor_from_signal(signal, broker)
+    trade = broker.place_condor_order(contract, credit_limit, n_contracts)
     broker.disconnect()
 """
 from __future__ import annotations
@@ -46,27 +46,81 @@ LIVE_PORT  = 7496
 TWS_HOST   = "127.0.0.1"
 CLIENT_ID  = 10
 
-FILL_TIMEOUT_SEC   = 60
-MAX_CONTRACTS      = int(os.getenv("N_CONTRACTS", "1"))
-EXECUTION_MODE     = os.getenv("EXECUTION_MODE", "PAPER").upper()
+FILL_TIMEOUT_SEC = 60
+
+# FIX Bug B5: guard against int("") when N_CONTRACTS is set but empty.
+try:
+    MAX_CONTRACTS = int(os.getenv("N_CONTRACTS", "1") or "1")
+    if MAX_CONTRACTS < 1:
+        MAX_CONTRACTS = 1
+except (ValueError, TypeError):
+    MAX_CONTRACTS = 1
+
+EXECUTION_MODE = os.getenv("EXECUTION_MODE", "PAPER").upper()
 
 SPX_SYMBOL  = "SPX"
 SPX_EXCH    = "CBOE"
 SPX_CURR    = "USD"
 SPX_SECTYPE = "OPT"
 
+# SPX options trade in $5 increments (weekly/0-DTE).
+# Far-OTM monthly strikes may use $25 increments, but $5 is the safe universal snap.
+SPX_STRIKE_INCREMENT = 5.0
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _snap_to_strike(value: float, increment: float = SPX_STRIKE_INCREMENT) -> float:
+    """Round *value* to the nearest valid SPX strike increment.
+
+    CBOE SPX weekly and 0-DTE options trade in $5 increments.
+    Statistically-derived strikes (from conformal intervals) are
+    continuous floats — snapping is required before sending to TWS.
+
+    Examples
+    --------
+    >>> _snap_to_strike(5012.37)
+    5010.0
+    >>> _snap_to_strike(5013.5)
+    5015.0
+    >>> _snap_to_strike(4997.1)
+    4995.0
+    """
+    return round(value / increment) * increment
+
 
 def _next_expiry_dte(dte: int = 0) -> str:
     """Return SPX option expiry in YYYYMMDD format.
 
     dte=0 → same-day (0-DTE), dte=1 → next trading day (1-DTE).
+
+    FIX Bug B2: pandas BDay does not exclude market holidays.
+    Use the project's own _us_market_holidays / validate_market_open
+    instead of adding a new dependency (pandas_market_calendars).
     """
-    from pandas.tseries.offsets import BDay
     import pandas as pd
-    target = (pd.Timestamp.today() + BDay(dte)).date()
+    from src.data.live_fetcher import _us_market_holidays
+
+    target = pd.Timestamp.today().date()
+    steps = 0
+    while steps < dte:
+        target += timedelta(days=1)
+        # Skip weekends
+        while target.weekday() >= 5:
+            target += timedelta(days=1)
+        # Skip market holidays
+        holidays = _us_market_holidays(target.year)
+        if target not in holidays:
+            steps += 1
+        # (if it was a holiday, loop again without incrementing steps)
+
+    # Ensure the final target is also not a holiday (relevant for dte=0)
+    holidays = _us_market_holidays(target.year)
+    while target.weekday() >= 5 or target in holidays:
+        target += timedelta(days=1)
+        holidays = _us_market_holidays(target.year)
+
     return target.strftime("%Y%m%d")
 
 
@@ -181,12 +235,16 @@ class IBKRBroker:
     ):
         """Build a 4-leg SPX iron-condor combo contract.
 
-        Returns (contract, order) tuple ready for placeOrder().
+        FIX Bug B4: qualify all four contracts in parallel with
+        qualifyContracts() instead of four sequential reqContractDetails()
+        calls — more idiomatic ib_async, avoids per-request round-trips.
+
+        Returns (combo_contract, n_contracts) tuple.
 
         Note: SPX options are European-style, cash-settled — no assignment risk.
         """
         try:
-            from ib_async import Contract, ComboLeg, Order
+            from ib_async import Contract, ComboLeg
         except ImportError:
             raise ImportError("ib_async not installed")
 
@@ -200,9 +258,9 @@ class IBKRBroker:
             (long_put_strike,   "P", "BUY"),
         ]
 
-        combo_legs: List[ComboLeg] = []
-        for strike, right, action in legs_data:
-            contract = Contract(
+        # Build all four contract stubs first
+        contracts = [
+            Contract(
                 symbol=SPX_SYMBOL,
                 secType=SPX_SECTYPE,
                 exchange=SPX_EXCH,
@@ -211,17 +269,32 @@ class IBKRBroker:
                 strike=strike,
                 right=right,
             )
-            details = self._ib.reqContractDetails(contract)
-            if not details:
-                raise ValueError(f"No contract found: {SPX_SYMBOL} {right} {strike} {expiry}")
-            con_id = details[0].contract.conId
-            leg = ComboLeg(
-                conId=con_id,
+            for strike, right, _ in legs_data
+        ]
+
+        # FIX Bug B4: qualify all legs in one batch call
+        try:
+            qualified = self._ib.qualifyContracts(*contracts)
+        except Exception as exc:
+            raise ValueError(f"Contract qualification failed: {exc}") from exc
+
+        # Validate all four legs resolved
+        for i, (qc, (strike, right, _)) in enumerate(zip(qualified, legs_data)):
+            if not getattr(qc, "conId", None):
+                raise ValueError(
+                    f"No contract found for leg {i}: {SPX_SYMBOL} {right} "
+                    f"{strike} {expiry} — verify strike is a valid $5 increment"
+                )
+
+        combo_legs: List[ComboLeg] = [
+            ComboLeg(
+                conId=qc.conId,
                 ratio=1,
                 action=action,
                 exchange=SPX_EXCH,
             )
-            combo_legs.append(leg)
+            for qc, (_, _, action) in zip(qualified, legs_data)
+        ]
 
         combo = Contract(
             symbol=SPX_SYMBOL,
@@ -378,10 +451,32 @@ class IBKRBroker:
 # Convenience: build condor from FullSignal
 # ---------------------------------------------------------------------------
 
-def build_condor_from_signal(signal, broker: IBKRBroker, dte: int = 0):
-    """Extract strikes from FullSignal and build the combo contract.
+def build_condor_from_signal(
+    signal,
+    broker: IBKRBroker,
+    dte: int = 0,
+) -> Tuple[Any, int, float]:
+    """Extract strikes from FullSignal, snap to valid exchange increments,
+    and build the combo contract.
+
+    FIX Bug B1: statistically-derived strikes are continuous floats.
+    SPX options trade in $5 increments — raw values like 5012.37 will
+    cause reqContractDetails to return nothing and crash execution.
+    All four strikes are snapped via _snap_to_strike() before use.
+
+    FIX Bug B3: corrected return signature — returns (contract, n_contracts,
+    credit_limit) so callers can pass all three to place_condor_order().
+    credit_limit is estimated as a fraction of the expected 1-day move
+    (conservative 12% × daily vol proxy using VIX=18 baseline).
 
     Safety checks applied before calling broker.build_iron_condor_contract().
+
+    Returns
+    -------
+    (combo_contract, n_contracts, credit_limit)
+        combo_contract : ib_async BAG Contract
+        n_contracts    : int    position size (regime-adjusted)
+        credit_limit   : float  net credit limit in points (≥ 0.10)
     """
     # Kill switch: regime RED
     regime = getattr(signal, "regime", "RED")
@@ -393,29 +488,58 @@ def build_condor_from_signal(signal, broker: IBKRBroker, dte: int = 0):
     if quality == "DEGRADED":
         raise ValueError("Data quality DEGRADED — kill switch activated")
 
-    # Extract strikes
-    sc = getattr(signal, "ic_short_call", None)
-    lc = getattr(signal, "ic_long_call",  None)
-    sp = getattr(signal, "ic_short_put",  None)
-    lp = getattr(signal, "ic_long_put",   None)
+    # Extract raw strikes
+    sc_raw = getattr(signal, "ic_short_call", None)
+    lc_raw = getattr(signal, "ic_long_call",  None)
+    sp_raw = getattr(signal, "ic_short_put",  None)
+    lp_raw = getattr(signal, "ic_long_put",   None)
 
-    if any(v is None for v in (sc, lc, sp, lp)):
-        raise ValueError(f"Missing strike levels: short_call={sc}, long_call={lc}, "
-                         f"short_put={sp}, long_put={lp}")
+    if any(v is None for v in (sc_raw, lc_raw, sp_raw, lp_raw)):
+        raise ValueError(
+            f"Missing strike levels: short_call={sc_raw}, long_call={lc_raw}, "
+            f"short_put={sp_raw}, long_put={lp_raw}"
+        )
 
+    # FIX Bug B1: snap all strikes to nearest valid $5 increment
+    sc = _snap_to_strike(sc_raw)
+    lc = _snap_to_strike(lc_raw)
+    sp = _snap_to_strike(sp_raw)
+    lp = _snap_to_strike(lp_raw)
+
+    logger.info(
+        "Strike snap: SC %.2f→%.0f  LC %.2f→%.0f  SP %.2f→%.0f  LP %.2f→%.0f",
+        sc_raw, sc, lc_raw, lc, sp_raw, sp, lp_raw, lp,
+    )
+
+    # Position sizing (regime-adjusted)
     n = MAX_CONTRACTS
     if regime == "YELLOW":
         n = max(1, n // 2)
         logger.info("YELLOW regime: halving position size to %d contract(s)", n)
 
+    # FIX Bug B3: compute a conservative credit limit.
+    # Estimate: 12% of the daily expected move at VIX=18 baseline.
+    # Uses signal.prior_close if available; otherwise SPX ~5000 proxy.
+    prior_close = float(getattr(signal, "prior_close", None) or 5000.0)
+    wing_width  = float(getattr(signal, "wing_width_pts", 50.0) or 50.0)
+    # daily_move ≈ (vix / 100) * prior_close / sqrt(252)
+    daily_move  = (18.0 / 100.0) * prior_close / (252 ** 0.5)
+    credit_limit = max(round(daily_move * 0.12, 2), 0.10)   # floor at $0.10
+    logger.info(
+        "Credit limit estimate: prior_close=%.2f daily_move=%.2f credit=%.2f",
+        prior_close, daily_move, credit_limit,
+    )
+
     expiry = _next_expiry_dte(dte)
 
     contract, n_used = broker.build_iron_condor_contract(
-        short_call_strike=round(sc, 0),
-        long_call_strike=round(lc, 0),
-        short_put_strike=round(sp, 0),
-        long_put_strike=round(lp, 0),
+        short_call_strike=sc,
+        long_call_strike=lc,
+        short_put_strike=sp,
+        long_put_strike=lp,
         expiry=expiry,
         n_contracts=n,
     )
-    return contract, n_used
+
+    # FIX Bug B3: return all three values callers need
+    return contract, n_used, credit_limit
