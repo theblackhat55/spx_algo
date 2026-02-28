@@ -31,12 +31,9 @@ import json
 import logging
 import os
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 logger = logging.getLogger(__name__)
 
@@ -265,7 +262,7 @@ class IBKRBroker:
         )
 
         record = {
-            "timestamp":     datetime.utcnow().isoformat() + "Z",
+            "timestamp":     datetime.now(timezone.utc).isoformat(),
             "action":        "PLACE_ORDER",
             "mode":          "PAPER" if self.paper else "LIVE",
             "credit_limit":  credit_limit,
@@ -348,7 +345,7 @@ class IBKRBroker:
         )
 
         record = {
-            "timestamp":    datetime.utcnow().isoformat() + "Z",
+            "timestamp":    datetime.now(timezone.utc).isoformat(),
             "action":       "CLOSE_POSITION",
             "debit_limit":  debit_limit,
             "n_contracts":  n_contracts,

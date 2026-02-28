@@ -44,9 +44,6 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Optional
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 try:
     from dotenv import load_dotenv
     load_dotenv()

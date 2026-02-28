@@ -30,9 +30,6 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Type
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
 

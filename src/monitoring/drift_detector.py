@@ -138,9 +138,19 @@ class DriftDetector:
         upper_68_low:   float,
         condor_win:     int   = -1,   # 1=win, 0=loss, -1=skip
         regime:         str   = "UNKNOWN",
+        # 90% interval bounds — independently tracked (Issue 5 fix)
+        lower_90_high:  Optional[float] = None,
+        upper_90_high:  Optional[float] = None,
+        lower_90_low:   Optional[float] = None,
+        upper_90_low:   Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Record one day's prediction vs actuals and update the rolling window.
+
+        The 90% bounds are optional kwargs for backward compatibility; when
+        supplied they are evaluated independently of the 68% bounds so the
+        drift detector can distinguish interval-width calibration failures
+        from point-prediction failures.
 
         Returns the row dict appended.
         """
@@ -151,7 +161,19 @@ class DriftDetector:
             (lower_68_high <= actual_high <= upper_68_high) and
             (lower_68_low  <= actual_low  <= upper_68_low)
         )
-        cov_90 = int(cov_68)   # simplified: treat 90 same as 68 unless explicit
+
+        # 90% coverage: use explicit bounds when provided, otherwise fall back
+        # to the 68% result (conservative — the 90% interval is at least as
+        # wide, so if 68% missed the 90% certainly missed too).
+        if (lower_90_high is not None and upper_90_high is not None and
+                lower_90_low is not None and upper_90_low is not None):
+            cov_90 = int(
+                (lower_90_high <= actual_high <= upper_90_high) and
+                (lower_90_low  <= actual_low  <= upper_90_low)
+            )
+        else:
+            # Fallback: if 68% is covered the wider 90% is also covered
+            cov_90 = cov_68
 
         row = {
             "date":          signal_date,

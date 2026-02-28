@@ -23,7 +23,6 @@ import pandas as pd
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.models.base_model import BaseModel
 
@@ -72,8 +71,6 @@ class XGBoostModel(BaseModel):
             random_state=42,
             eval_metric="logloss" if task == "classification" else "rmse",
         )
-        if task == "classification":
-            default_params["use_label_encoder"] = False
         self.params = {**default_params, **(params or {})}
 
     def fit(

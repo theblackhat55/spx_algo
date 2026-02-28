@@ -28,9 +28,6 @@ import numpy as np
 import pandas as pd
 from sklearn import metrics as skm
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 from src.models.base_model import BaseModel
 from src.targets.splitter import WalkForwardSplitter, SplitConfig
 

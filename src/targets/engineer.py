@@ -38,9 +38,6 @@ from typing import List, Optional
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 from config.settings import PROCESSED_DATA_DIR, SPX_FILE, RAW_DATA_DIR
 
 logger = logging.getLogger(__name__)

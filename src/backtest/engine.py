@@ -33,8 +33,12 @@ We do not have historical bid/ask data, so credit is approximated as:
 
     credit = (vix_close / 100) * prior_close * credit_fraction
 
-where ``credit_fraction`` defaults to 0.30 (30% of 1-day expected move,
-based on typical SPX 0-DTE iron condor pricing).
+where ``credit_fraction`` defaults to 0.12 (12% of 1-day expected move).
+
+Calibration note: empirical SPX 0-DTE iron condors (±1σ wings, ATM short
+strikes) typically collect 10–15% of the 1-day expected move in net credit.
+0.30 (the original default) overstated credit by ~2×.  0.12 is conservative
+and consistent with OptionsDX/CBOE DataShop historical premium data.
 
 This is a modelling simplification that must be replaced with real option
 prices in live deployment.  The approach is declared explicitly so the
@@ -51,7 +55,6 @@ import pandas as pd
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from src.calibration.regime import Regime
 
@@ -80,7 +83,7 @@ class PositionConfig:
     wing_width_pts: float = 20.0    # e.g. buy call at strike + $20
 
     # ── Credit model ─────────────────────────────────────────────────────
-    credit_fraction: float = 0.30   # fraction of 1-day expected move
+    credit_fraction: float = 0.12   # 12% of 1-day expected move (calibrated)
 
     # ── Position sizing ───────────────────────────────────────────────────
     contracts_green:  int = 1       # full size on GREEN

@@ -34,9 +34,6 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 from config.settings import (
     RAW_DATA_DIR, PROCESSED_DATA_DIR, OUTPUT_DIR,
     SPX_FILE, VIX_FILE,

@@ -24,9 +24,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 from config.settings import (
     RAW_DATA_DIR,
     DATA_START_DATE,

@@ -33,9 +33,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 logger = logging.getLogger(__name__)
 
 # Calibration tail: last N rows are used for conformal calibration
@@ -146,21 +143,115 @@ def _model_hash(path: Path) -> str:
 # ---------------------------------------------------------------------------
 # Minimal in-process regression trainer
 # ---------------------------------------------------------------------------
+# Model artifact loader
+# ---------------------------------------------------------------------------
+
+def _load_model_artifact(model_dir: Path, target_name: str):
+    """
+    Try to load a pre-trained sklearn-compatible model artifact from
+    ``output/models/regressor_{target_name}.pkl``.  Returns the fitted model
+    or None if the artifact does not exist or cannot be loaded.
+
+    The weekly retrain runner (src/models/trainer.py) is responsible for
+    writing these artifacts.  If they exist the production signal uses the
+    same model that was validated in walk-forward backtesting — preserving
+    the backtest-matches-production invariant.
+    """
+    import joblib
+    for stem in (f"regressor_{target_name}", f"model_{target_name}", target_name):
+        path = model_dir / f"{stem}.pkl"
+        if path.exists():
+            try:
+                model = joblib.load(path)
+                logger.info("Loaded pre-trained artifact: %s", path)
+                return model
+            except Exception as exc:
+                logger.warning("Could not load artifact %s: %s", path, exc)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Lightweight stacking ensemble (fallback when no artifact exists)
+# ---------------------------------------------------------------------------
+
+class _StackingEnsemble:
+    """
+    Minimal stacking ensemble: Ridge + HuberRegressor averaged predictions.
+
+    Used only when no pre-trained artifact is available.  Both models are
+    fitted in-process on the full training window (not just calibration tail)
+    so they use the same data as the walk-forward trainer would.
+
+    Using two qualitatively different estimators (L2 linear + robust linear)
+    reduces over-fit to any single model family and narrows the conformal
+    residuals compared to Ridge alone.
+    """
+
+    def __init__(self, name: str, seed: int = DEFAULT_SEED):
+        self.name   = name
+        self._seed  = seed
+        self._ridge  = None
+        self._huber  = None
+        self._fitted = False
+
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> "_StackingEnsemble":
+        from sklearn.linear_model  import Ridge, HuberRegressor
+        X_arr = X.values
+        y_arr = y.values
+        self._ridge = Ridge(alpha=1.0)
+        self._ridge.fit(X_arr, y_arr)
+        self._huber = HuberRegressor(epsilon=1.35, max_iter=300)
+        self._huber.fit(X_arr, y_arr)
+        self._fitted = True
+        logger.info("%s: Ridge + HuberRegressor ensemble fitted on %d rows.",
+                    self.name, len(y))
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        if not self._fitted:
+            raise RuntimeError(f"{self.name} not fitted")
+        X_arr = X.values
+        ridge_pred = self._ridge.predict(X_arr)
+        huber_pred = self._huber.predict(X_arr)
+        return (ridge_pred + huber_pred) / 2.0
+
+
+# ---------------------------------------------------------------------------
+# In-process regression trainer  (used only when artifact is absent)
+# ---------------------------------------------------------------------------
 
 def _fit_regression_model(
     features: pd.DataFrame,
     target: pd.Series,
-    model_type: str = "ridge",
+    model_type: str = "ensemble",
     seed: int = DEFAULT_SEED,
+    model_dir: Optional[Path] = None,
 ):
-    """Fit a lightweight regression model. Returns fitted BaseModel-like object."""
-    from src.models.linear_models import RidgeRegressionModel as RidgeModel
+    """
+    Return a fitted regression model for *target*.
 
-    model = RidgeModel(name=f"ridge_{target.name}", alpha=1.0)
+    Resolution order
+    ----------------
+    1. Load pre-trained artifact from ``model_dir`` (if available).
+       These are written by the weekly walk-forward retrain and validated
+       against backtest metrics — using them preserves the
+       backtest-matches-production invariant.
+    2. Fall back to an in-process Ridge + HuberRegressor stacking ensemble.
+       This replaces the previous Ridge-only path and provides more robust
+       predictions than a single linear model.
+    """
+    # ── 1. Try pre-trained artifact ───────────────────────────────────────
+    if model_dir is not None:
+        loaded = _load_model_artifact(Path(model_dir), target.name or "target")
+        if loaded is not None:
+            return loaded
+
+    # ── 2. Fallback: fit stacking ensemble in-process ─────────────────────
     valid = target.dropna()
-    X = features.loc[valid.index].fillna(0)
-    model.fit(X, valid)
-    return model
+    X     = features.loc[valid.index].fillna(0)
+    ensemble = _StackingEnsemble(name=f"ensemble_{target.name}", seed=seed)
+    ensemble.fit(X, valid)
+    return ensemble
 
 
 # ---------------------------------------------------------------------------
@@ -553,6 +644,13 @@ class SignalGenerator:
         pred_pcts: Dict[str, Any] = {}
         model_versions: Dict[str, str] = {}
 
+        # Resolve model artifact directory (written by weekly retrain)
+        try:
+            from config.settings import OUTPUT_DIR
+            model_dir: Optional[Path] = Path(OUTPUT_DIR) / "models"
+        except Exception:
+            model_dir = Path("output") / "models"
+
         for name, target in [("high", target_high), ("low", target_low)]:
             if target is None or len(target) < MIN_TRAIN_ROWS:
                 notes.append(f"Insufficient data for {name} model")
@@ -562,20 +660,32 @@ class SignalGenerator:
                     features.loc[target.dropna().index].fillna(0),
                     target.dropna(),
                     seed=self.seed,
+                    model_dir=model_dir,        # try artifact first
                 )
                 cp = _calibrate_conformal(model, features, target)
 
                 last_X = features.iloc[[-1]].fillna(0)
                 pred_val = float(model.predict(last_X)[0])
                 pred_pcts[f"pred_{name}_pct"] = pred_val
-                model_versions[f"ridge_{name}"] = "in-process"
+
+                # Record which model path was used
+                model_source = (
+                    "pretrained-artifact"
+                    if hasattr(model, "_fitted") and not isinstance(model, _StackingEnsemble)
+                    else (
+                        "stacking-ensemble"
+                        if isinstance(model, _StackingEnsemble)
+                        else "pretrained-artifact"
+                    )
+                )
+                model_versions[f"reg_{name}"] = model_source
+                notes.append(f"Fitted {name} model ({model_source}); pred_{name}_pct={pred_val:.4f}")
 
                 if name == "high":
                     cp_high = cp
                 else:
                     cp_low = cp
 
-                notes.append(f"Fitted {name} model; pred_{name}_pct={pred_val:.4f}")
             except Exception as exc:
                 notes.append(f"{name} model failed: {exc}")
                 logger.exception("Model fit failed for %s", name)
@@ -594,9 +704,8 @@ class SignalGenerator:
             rd = RegimeDetector(
                 use_hmm=True, use_garch=False,
                 hmm_states=4,
+                random_state=self.seed,   # pass seed directly — no global mutation
             )
-            # Lock HMM seed via monkey-patch on numpy
-            np.random.seed(self.seed)
             regime_series = rd.fit_predict(spx_df, vix_df)
             reg_int = int(regime_series.iloc[-1])
             reg_str = {0: "GREEN", 1: "YELLOW", 2: "RED"}.get(reg_int, "YELLOW")

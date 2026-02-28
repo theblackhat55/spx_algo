@@ -19,9 +19,6 @@ from pathlib import Path
 
 import pandas as pd
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 from config.settings import (
     RAW_DATA_DIR,
     PROCESSED_DATA_DIR,

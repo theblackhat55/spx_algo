@@ -25,9 +25,6 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 from src.monitoring.drift_detector import DriftDetector, DriftStatus
 from src.execution.paper_logger    import PaperTradeLogger
 from src.pipeline.alerting         import Alerter, AlertConfig

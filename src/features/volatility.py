@@ -31,9 +31,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-
 from config.settings import ATR_WINDOWS
 
 logger = logging.getLogger(__name__)

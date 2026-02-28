@@ -290,6 +290,7 @@ class RegimeDetector:
         vix_red_z: float = 3.0,
         atr_yellow_ratio: float = 1.5,
         atr_red_ratio: float = 2.5,
+        random_state: int = 42,       # passed through to HMM; no global seed mutation
     ):
         self.use_hmm          = use_hmm
         self.use_garch        = use_garch
@@ -298,6 +299,7 @@ class RegimeDetector:
         self.vix_red_z        = vix_red_z
         self.atr_yellow_ratio = atr_yellow_ratio
         self.atr_red_ratio    = atr_red_ratio
+        self.random_state     = random_state
         self._last_components: dict[str, pd.Series] = {}
 
     # ------------------------------------------------------------------
@@ -344,7 +346,8 @@ class RegimeDetector:
         if self.use_hmm:
             ret     = spx_df["Close"].pct_change()
             rng_pct = (spx_df["High"] - spx_df["Low"]) / spx_df["Close"].shift(1)
-            hmm_sig = hmm_regime(ret, rng_pct, n_states=self.hmm_states)
+            hmm_sig = hmm_regime(ret, rng_pct, n_states=self.hmm_states,
+                                  random_state=self.random_state)
             self._last_components["hmm"] = hmm_sig
             components.append(hmm_sig)
 
