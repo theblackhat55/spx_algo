@@ -93,6 +93,7 @@ class FullSignal:
 
     # Meta
     prior_close:        Optional[float] = None
+    vix_spot:           Optional[float] = None   # raw VIX close used for credit estimation
     n_features_used:    int             = 0
     model_versions:     Dict[str, str]  = field(default_factory=dict)
     data_quality:       str             = "FULL"   # FULL|PARTIAL|DEGRADED
@@ -346,6 +347,7 @@ def assemble_signal(
     mode:           str,
     metadata:       Dict[str, Any],
     wing_width_pts: float = 50.0,
+    vix_spot:       Optional[float] = None,
 ) -> FullSignal:
     """Compose all components into a FullSignal."""
     pred_high_pct = predictions.get("pred_high_pct")
@@ -418,6 +420,7 @@ def assemble_signal(
         prob_high_bin_050=predictions.get("prob_high_bin_050"),
         prob_low_bin_050=predictions.get("prob_low_bin_050"),
         prior_close=prior_close,
+        vix_spot=vix_spot,
         n_features_used=metadata.get("n_features", 0),
         model_versions=metadata.get("model_versions", {}),
         data_quality=metadata.get("data_quality", "FULL"),
@@ -562,6 +565,9 @@ class SignalGenerator:
 
         # ── Assemble ──────────────────────────────────────────────────
         predictions = {**pred_pcts, **clf_probs}
+        # Capture raw VIX close for credit-limit estimation in broker.py
+        vix_spot = float(vix_df["Close"].iloc[-1]) if vix_df is not None and not vix_df.empty else None
+
         signal = assemble_signal(
             predictions=predictions,
             intervals_high=intervals_high,
@@ -573,6 +579,7 @@ class SignalGenerator:
             mode=mode,
             metadata=metadata,
             wing_width_pts=self.wing_width_pts,
+            vix_spot=vix_spot,
         )
 
         # ── Validate ──────────────────────────────────────────────────

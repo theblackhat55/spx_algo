@@ -517,17 +517,18 @@ def build_condor_from_signal(
         n = max(1, n // 2)
         logger.info("YELLOW regime: halving position size to %d contract(s)", n)
 
-    # FIX Bug B3: compute a conservative credit limit.
-    # Estimate: 12% of the daily expected move at VIX=18 baseline.
-    # Uses signal.prior_close if available; otherwise SPX ~5000 proxy.
+    # FIX Bug B3 (refined): compute credit limit from actual VIX close.
+    # signal.vix_spot is populated by signal_generator.generate() from vix_df.
+    # Falls back to the long-run VIX average (18) if the field is absent or None,
+    # e.g. for old JSON signals or error signals — zero regression risk.
     prior_close = float(getattr(signal, "prior_close", None) or 5000.0)
-    wing_width  = float(getattr(signal, "wing_width_pts", 50.0) or 50.0)
-    # daily_move ≈ (vix / 100) * prior_close / sqrt(252)
-    daily_move  = (18.0 / 100.0) * prior_close / (252 ** 0.5)
+    vix         = float(getattr(signal, "vix_spot",    None) or 18.0)
+    # daily_move ≈ (vix / 100) * prior_close / sqrt(252)  [1-sigma daily range]
+    daily_move   = (vix / 100.0) * prior_close / (252 ** 0.5)
     credit_limit = max(round(daily_move * 0.12, 2), 0.10)   # floor at $0.10
     logger.info(
-        "Credit limit estimate: prior_close=%.2f daily_move=%.2f credit=%.2f",
-        prior_close, daily_move, credit_limit,
+        "Credit limit: VIX=%.1f  prior_close=%.2f  daily_move=%.2f  credit=%.2f",
+        vix, prior_close, daily_move, credit_limit,
     )
 
     expiry = _next_expiry_dte(dte)
