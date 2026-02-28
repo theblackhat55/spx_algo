@@ -131,6 +131,8 @@ class HyperparamSweep:
                 except Exception as exc:
                     logger.debug("Trial failed on fold: %s", exc)
                     fold_scores.append(np.inf)
+            # Cache per-fold scores so post-optimize loop needs no re-fitting
+            trial.set_user_attr("fold_scores", fold_scores)
             return float(np.mean(fold_scores))
 
         study = optuna.create_study(
@@ -145,29 +147,18 @@ class HyperparamSweep:
             show_progress_bar=False,
         )
 
-        # Re-evaluate all trials with per-fold breakdown
+        # Retrieve cached per-fold scores from each trial — no re-fitting needed
         rows = []
         for t in study.trials:
             if t.state.name != "COMPLETE":
                 continue
-            params = t.params
-            fold_scores = []
-            for tr_idx, te_idx in folds:
-                X_tr, y_tr = X.iloc[tr_idx], y.iloc[tr_idx]
-                X_te, y_te = X.iloc[te_idx], y.iloc[te_idx]
-                try:
-                    mdl = self.model_class(**params)
-                    mdl.fit(X_tr, y_tr)
-                    preds = mdl.predict(X_te)
-                    fold_scores.append(metric_fn(y_te.values, preds))
-                except Exception:
-                    fold_scores.append(np.nan)
+            fold_scores = t.user_attrs.get("fold_scores", [])
             rows.append({
                 "trial_id":    t.number,
-                "params":      params,
+                "params":      t.params,
                 "fold_scores": fold_scores,
-                "mean_score":  float(np.nanmean(fold_scores)),
-                "std_score":   float(np.nanstd(fold_scores)),
+                "mean_score":  float(np.nanmean(fold_scores)) if fold_scores else np.inf,
+                "std_score":   float(np.nanstd(fold_scores))  if fold_scores else np.inf,
             })
 
         results = pd.DataFrame(rows).sort_values("mean_score")

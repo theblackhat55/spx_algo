@@ -94,8 +94,7 @@ fi
 echo ""
 echo "STEP 5/7  Drift detector health check..."
 DRIFT_OUT=$(python -c "
-import sys, json
-sys.path.insert(0, '.')
+import json
 from src.monitoring.drift_detector import DriftDetector
 dd = DriftDetector()
 status = dd.check_drift()

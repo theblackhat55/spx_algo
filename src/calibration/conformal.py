@@ -38,8 +38,6 @@ from typing import Optional, Tuple
 import numpy as np
 import pandas as pd
 
-import sys
-from pathlib import Path
 
 from src.models.base_model import BaseModel
 

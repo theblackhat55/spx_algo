@@ -91,11 +91,36 @@ def _us_market_holidays(year: int) -> set:
         if dt.weekday() == 6:   return dt + timedelta(1)   # Sun → Mon
         return dt
 
+    # ── Good Friday (NYSE closed) ──────────────────────────────────────────────
+    # Computed as the Friday before Easter Sunday (Anonymous Gregorian algorithm).
+    def _good_friday(y: int):
+        a = y % 19
+        b = y // 100
+        c = y % 100
+        d_ = b // 4
+        e = b % 4
+        f = (b + 8) // 25
+        g = (b - f + 1) // 3
+        h = (19 * a + b - d_ - g + 15) % 30
+        i = c // 4
+        k = c % 4
+        l = (32 + 2 * e + 2 * i - h - k) % 7
+        m = (a + 11 * h + 22 * l) // 451
+        month = (h + l - 7 * m + 114) // 31
+        day   = ((h + l - 7 * m + 114) % 31) + 1
+        from datetime import date as _d2
+        easter = _d2(y, month, day)
+        from datetime import timedelta as _td
+        return easter - _td(days=2)   # Good Friday = 2 days before Easter
+
     holidays = {
         nearest_weekday(d(year,  1,  1)),   # New Year's Day
         nearest_weekday(d(year,  7,  4)),   # Independence Day
-        nearest_weekday(d(year, 11, 11)),   # Veterans Day (markets open — included for completeness)
+        # NOTE: Veterans Day (Nov 11) intentionally excluded — NYSE is open
+        # NOTE: Black Friday intentionally excluded — NYSE is open (early close only)
         nearest_weekday(d(year, 12, 25)),   # Christmas
+        _good_friday(year),                 # Good Friday (NYSE closed)
+        nearest_weekday(d(year,  6, 19)),   # Juneteenth (NYSE closed since 2022)
     }
     # MLK Day (3rd Monday Jan), Presidents Day (3rd Monday Feb),
     # Memorial Day (last Monday May), Labor Day (1st Monday Sep)
@@ -116,10 +141,10 @@ def _us_market_holidays(year: int) -> set:
     holidays.add(last_monday(year, 5))          # Memorial Day
     holidays.add(nth_weekday(year, 9, 0, 1))   # Labor Day
 
-    # Thanksgiving (4th Thursday Nov) + Black Friday
+    # Thanksgiving (4th Thursday Nov) — NYSE closed
+    # Black Friday is an early close (1pm ET), NOT a full holiday — do not include.
     thanksgiving = nth_weekday(year, 11, 3, 4)
     holidays.add(thanksgiving)
-    holidays.add(thanksgiving + timedelta(1))   # Black Friday (half-day, treat as closed)
 
     return holidays
 

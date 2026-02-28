@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 import os
 import smtplib
+import sys                          # FIX Bug C1: was missing
 import time
 import traceback
 from datetime import datetime, date
@@ -199,29 +200,67 @@ class DailyScheduler:
 
     # ------------------------------------------------------------------
     def run_once(self) -> bool:
-        """Run the pipeline once and return True on success."""
-        logger.info("Scheduler: starting pipeline run.")
+        """Run the pipeline once and return True on success.
+
+        FIX Bug C3: use SignalGenerator.generate() instead of the stub
+        PipelineRunner.run() which uses hardcoded conformal intervals.
+        Falls back to PipelineRunner if SignalGenerator is unavailable.
+        """
+        logger.info("Scheduler: starting signal generation.")
         try:
-            from src.pipeline.runner import PipelineRunner
-            runner = PipelineRunner()
-            signal = runner.run(mode="live", save_signal=True)
+            # Primary path: full SignalGenerator with real conformal intervals
+            from src.pipeline.signal_generator import SignalGenerator
+            sg = SignalGenerator()
+            signal = sg.generate()
 
-            if signal.tradeable:
-                logger.info(
-                    "Signal: %s | high=%.2f | low=%.2f | call=%.2f | put=%.2f",
-                    signal.signal_date,
-                    signal.pred_high   or 0,
-                    signal.pred_low    or 0,
-                    signal.call_strike or 0,
-                    signal.put_strike  or 0,
-                )
-            else:
-                logger.warning("Signal: NOT TRADEABLE — regime=%s", signal.regime)
+            if signal is not None:
+                tradeable = getattr(signal, "tradeable", False)
+                if tradeable:
+                    logger.info(
+                        "Signal generated: %s | high=%.5f | low=%.5f | "
+                        "call=%.2f | put=%.2f",
+                        getattr(signal, "target_date", "?"),
+                        getattr(signal, "predicted_high", 0) or 0,
+                        getattr(signal, "predicted_low",  0) or 0,
+                        getattr(signal, "ic_short_call",  0) or 0,
+                        getattr(signal, "ic_short_put",   0) or 0,
+                    )
+                else:
+                    regime = getattr(signal, "regime", "UNKNOWN")
+                    logger.warning("Signal NOT TRADEABLE — regime=%s", regime)
+                return True
 
-            return True
+            logger.warning("SignalGenerator returned None — pipeline may have no data")
+            return False
+
+        except ImportError:
+            # Graceful fallback: PipelineRunner (less accurate intervals)
+            logger.warning(
+                "SignalGenerator unavailable; falling back to PipelineRunner."
+            )
+            try:
+                from src.pipeline.runner import PipelineRunner
+                runner = PipelineRunner()
+                signal = runner.run(mode="live", save_signal=True)
+                if signal.tradeable:
+                    logger.info(
+                        "PipelineRunner signal: %s | high=%.2f | low=%.2f",
+                        signal.signal_date,
+                        signal.pred_high or 0,
+                        signal.pred_low  or 0,
+                    )
+                else:
+                    logger.warning(
+                        "PipelineRunner signal NOT TRADEABLE — regime=%s",
+                        signal.regime,
+                    )
+                return True
+            except Exception:
+                logger.error("PipelineRunner fallback FAILED:\n%s", traceback.format_exc())
+                return False
 
         except Exception:
-            logger.error("Pipeline run FAILED:\n%s", traceback.format_exc())
+            logger.error("SignalGenerator run FAILED:\n%s", traceback.format_exc())
             return False
 
     # ------------------------------------------------------------------
@@ -296,7 +335,7 @@ def main() -> None:
 
     if args.once:
         ok = scheduler.run_once()
-        sys.exit(0 if ok else 1)
+        sys.exit(0 if ok else 1)          # sys is now imported above
     elif args.check:
         ok = scheduler.switch.check()
         sys.exit(0 if ok else 1)

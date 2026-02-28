@@ -149,19 +149,51 @@ class PaperTradeLogger:
             if pred_dir else np.nan
         )
 
-        # Condor result (simple heuristic: win if both strikes unbreached)
+        # Condor result: win if both short strikes unbreached
+        # P&L formula (Bug 7 & 8 fix):
+        #   Credit approximation uses same formula as BacktestEngine:
+        #     credit_pts = (vix_estimate/100) * prior_close / sqrt(252) * 0.12
+        #   Without live VIX in the logger we use a conservative fixed estimate.
+        #   Win  P&L = credit_pts - friction (not a spurious interval subtraction)
+        #   Loss P&L = credit_pts - intrusion - friction  (credit offsets the loss)
         call_k = _f("call_strike")
         put_k  = _f("put_strike")
         if np.isnan(call_k) or np.isnan(put_k) or df.at[idx, "regime"] == "RED":
             condor_result = "skip"
             condor_pnl    = 0.0
-        elif actual_high <= call_k and actual_low >= put_k:
-            condor_result = "win"
-            condor_pnl    = abs(_f("lower_90_high") - _f("upper_90_low")) * 0.5 * 100
         else:
-            condor_result = "loss"
-            intrusion     = max(actual_high - call_k, 0) + max(put_k - actual_low, 0)
-            condor_pnl    = -intrusion * 100
+            # Estimate credit: use prior close from signal if available,
+            # otherwise fall back to a generic 0.5% credit (conservative).
+            prior_close = _f("predicted_high")   # proxy; actual close not stored
+            if np.isnan(prior_close) or prior_close <= 0:
+                # Conservative fallback: 0.5% of a typical SPX level
+                credit_pts = 5.0
+            else:
+                # credit ~ 12% of 1-day expected move @ VIX=18 (conservative)
+                credit_pts = (18 / 100.0) * prior_close / (252 ** 0.5) * 0.12
+            friction = 0.40   # $0.10 per leg × 4 legs
+
+            if actual_high <= call_k and actual_low >= put_k:
+                condor_result = "win"
+                condor_pnl    = (credit_pts - friction) * 100   # per-contract multiplier
+            else:
+                # Cap each leg intrusion at wing width (max loss per leg = wing_width - credit)
+                long_call = _f("long_call_strike")
+                long_put  = _f("long_put_strike")
+                wing_width = 20.0   # default 20-pt wing
+                if not np.isnan(long_call) and long_call > call_k:
+                    wing_width = min(wing_width, long_call - call_k)
+                if not np.isnan(long_put) and long_put < put_k:
+                    wing_width = min(wing_width, put_k - long_put)
+                call_intrusion = min(max(actual_high - call_k, 0.0), wing_width)
+                put_intrusion  = min(max(put_k - actual_low,  0.0), wing_width)
+                # Take the worse breached leg (not additive; max loss from one side)
+                worst_intrusion = max(call_intrusion, put_intrusion)
+                condor_result  = "loss"
+                condor_pnl     = (credit_pts - worst_intrusion - friction) * 100
+                # P&L is always between -(wing_width - credit)*100 and 0 for a loss
+                max_loss = -(wing_width - credit_pts) * 100
+                condor_pnl = max(condor_pnl, max_loss)
 
         # Coverage flags
         def _cov(lo_col, hi_col, val):

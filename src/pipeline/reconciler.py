@@ -90,6 +90,27 @@ def _fetch_actual(trade_date: str) -> Optional[Dict[str, float]]:
 
 
 # ---------------------------------------------------------------------------
+# Helpers: safe float conversion and formatting
+# ---------------------------------------------------------------------------
+
+def _safe_float(v) -> float:
+    """Return float(v) or np.nan on failure."""
+    try:
+        f = float(v)
+        return f if np.isfinite(f) else np.nan
+    except (TypeError, ValueError):
+        return np.nan
+
+
+def _fmt(v, decimals: int = 4) -> str:
+    """Format a numeric value for display; return '—' if not finite."""
+    f = _safe_float(v)
+    if np.isnan(f):
+        return "—"
+    return f"{f:.{decimals}f}"
+
+
+# ---------------------------------------------------------------------------
 # Reconciler
 # ---------------------------------------------------------------------------
 
@@ -123,11 +144,16 @@ class Reconciler:
         """
         Reconcile yesterday's signal against actual OHLCV.
 
-        Parameters
-        ----------
-        trade_date : YYYY-MM-DD of the trading day whose signal we are checking.
+        FIX Bug C2: predictions are stored as percentages (e.g. 0.003 = +0.3%).
+        We must convert to absolute price before comparing to actual OHLCV or
+        compare percentage-to-percentage.  We choose the latter: compute
+        actual pct move from prior close and compare to predicted_pct.
 
-        Returns a results dict with errors, drift status, and alert text.
+        FIX Bug C3 (format-string crash): all formatting uses _fmt() which
+        returns '—' for None/NaN, preventing TypeError/ValueError.
+
+        FIX Bug H4 (send_text missing): use send_summary() which dispatches
+        text through Alerter.send_failure() with an INFO severity wrapper.
         """
         result: Dict[str, Any] = {
             "trade_date":  trade_date,
@@ -155,33 +181,68 @@ class Reconciler:
         self.paper_logger.log_signal(signal)
         self.paper_logger.log_outcome(trade_date, actual)
 
-        # 4. Compute errors
-        pred_high = signal.get("predicted_high_pct") or signal.get("upper_68_high", np.nan)
-        pred_low  = signal.get("predicted_low_pct")  or signal.get("lower_68_low",  np.nan)
-        try:
-            high_err = abs(float(actual["High"]) - float(pred_high))
-            low_err  = abs(float(actual["Low"])  - float(pred_low))
-        except (TypeError, ValueError):
-            high_err = low_err = np.nan
+        # 4. Compute errors — FIX Bug C2
+        # Signal stores predictions as % moves (e.g. 0.003 = +0.3% above prior close).
+        # We derive prior_close from the signal, then convert actual OHLCV to %.
+        # If prior_close is unavailable we fall back to reporting the raw pct error.
 
-        result["high_error_pct"] = round(float(high_err), 6) if not np.isnan(high_err) else None
-        result["low_error_pct"]  = round(float(low_err),  6) if not np.isnan(low_err)  else None
-        result["actual"]         = actual
-        result["predicted_high"] = pred_high
-        result["predicted_low"]  = pred_low
+        prior_close = _safe_float(signal.get("prior_close"))
+
+        # Predicted values — prefer _pct keys; fall back to interval midpoints
+        pred_high_pct = _safe_float(
+            signal.get("predicted_high_pct")
+            or signal.get("pred_high")
+        )
+        pred_low_pct = _safe_float(
+            signal.get("predicted_low_pct")
+            or signal.get("pred_low")
+        )
+
+        actual_high = float(actual["High"])
+        actual_low  = float(actual["Low"])
+
+        if not np.isnan(prior_close) and prior_close > 0:
+            # Convert actual OHLCV to percentage move for like-for-like comparison
+            actual_high_pct = (actual_high - prior_close) / prior_close
+            actual_low_pct  = (actual_low  - prior_close) / prior_close
+
+            high_err = abs(actual_high_pct - pred_high_pct) if not np.isnan(pred_high_pct) else np.nan
+            low_err  = abs(actual_low_pct  - pred_low_pct)  if not np.isnan(pred_low_pct)  else np.nan
+
+            result["actual_high_pct"]   = round(actual_high_pct, 6)
+            result["actual_low_pct"]    = round(actual_low_pct,  6)
+        else:
+            # prior_close unavailable: compare raw pct predictions to raw prices
+            # This is a degraded path — flag it in notes.
+            high_err = np.nan
+            low_err  = np.nan
+            result["errors"].append("prior_close missing — pct error not computed")
+            logger.warning("prior_close missing for %s — error metrics degraded", trade_date)
+
+        result["high_error_pct"]  = round(float(high_err), 6) if not np.isnan(high_err) else None
+        result["low_error_pct"]   = round(float(low_err),  6) if not np.isnan(low_err)  else None
+        result["actual"]          = actual
+        result["predicted_high"]  = pred_high_pct
+        result["predicted_low"]   = pred_low_pct
 
         # 5. Update drift detector
         regime = signal.get("regime", "UNKNOWN")
+
+        # drift_detector.update() expects raw % move predictions
         drift_row = self.drift_detector.update(
             signal_date    = trade_date,
-            predicted_high = float(pred_high) if pred_high else 0.0,
-            predicted_low  = float(pred_low)  if pred_low  else 0.0,
-            actual_high    = float(actual["High"]),
-            actual_low     = float(actual["Low"]),
-            lower_68_high  = float(signal.get("lower_68_high", 0) or 0),
-            upper_68_high  = float(signal.get("upper_68_high", 1e9) or 1e9),
-            lower_68_low   = float(signal.get("lower_68_low", 0) or 0),
-            upper_68_low   = float(signal.get("upper_68_low", 1e9) or 1e9),
+            predicted_high = float(pred_high_pct) if not np.isnan(pred_high_pct) else 0.0,
+            predicted_low  = float(pred_low_pct)  if not np.isnan(pred_low_pct)  else 0.0,
+            actual_high    = actual_high_pct if (not np.isnan(prior_close) and prior_close > 0)
+                             else actual_high,
+            actual_low     = actual_low_pct  if (not np.isnan(prior_close) and prior_close > 0)
+                             else actual_low,
+            lower_68_high  = _safe_float(signal.get("lower_68_high", 0) or 0),
+            upper_68_high  = _safe_float(signal.get("upper_68_high", 1e9) or 1e9),
+            lower_68_low   = _safe_float(signal.get("lower_68_low", 0) or 0),
+            upper_68_low   = _safe_float(signal.get("upper_68_low", 1e9) or 1e9),
+            lower_90_high  = _safe_float(signal.get("lower_90_high") or signal.get("lower_90")),
+            upper_90_high  = _safe_float(signal.get("upper_90_high") or signal.get("upper_90")),
             condor_win     = -1,   # will be set from paper_logger if available
             regime         = regime,
         )
@@ -197,22 +258,21 @@ class Reconciler:
         except Exception:
             pass
 
-        # 8. Send alert
+        # 8. Send alert — FIX Bug C3 (safe formatting) + FIX Bug H4 (no send_text)
         summary_text = (
             f"📊 Reconciliation {trade_date}\n"
-            f"  Pred High: {pred_high:.4f}  |  Actual High: {actual['High']:.2f}  "
-            f"  Err: {high_err:.4f}\n"
-            f"  Pred Low:  {pred_low:.4f}  |  Actual Low:  {actual['Low']:.2f}  "
-            f"  Err: {low_err:.4f}\n"
+            f"  Pred High %: {_fmt(pred_high_pct, 4)}  |  "
+            f"Actual High: {_fmt(actual_high, 2)}  |  "
+            f"Err: {_fmt(high_err, 4)}\n"
+            f"  Pred Low  %: {_fmt(pred_low_pct, 4)}  |  "
+            f"Actual Low:  {_fmt(actual_low, 2)}  |  "
+            f"Err: {_fmt(low_err, 4)}\n"
             f"  Regime: {regime}  |  Drift: {drift_status.value}\n"
         )
         result["summary_text"] = summary_text
 
         if self.alerter:
-            try:
-                self.alerter.send_text(summary_text)
-            except Exception as exc:
-                logger.warning("Alert failed: %s", exc)
+            self._send_summary(summary_text)
 
         logger.info("Reconciliation complete for %s — drift=%s", trade_date, drift_status.value)
         return result
@@ -262,15 +322,29 @@ class Reconciler:
             f"  Total P&L:      ${stats.get('condor_total_pnl', 0):,.2f}\n"
         )
         if self.alerter:
-            try:
-                self.alerter.send_text(digest_text)
-            except Exception as exc:
-                logger.warning("Weekly digest alert failed: %s", exc)
+            self._send_summary(digest_text)
 
         logger.info("Weekly digest saved: %s", report_path)
         return digest
 
     # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _send_summary(self, text: str) -> None:
+        """
+        FIX Bug H4: Alerter has no send_text(); route summary messages
+        through send_failure() with an INFO prefix so they reach all channels.
+        Swallows exceptions so a missing webhook never kills reconciliation.
+        """
+        if not self.alerter:
+            return
+        try:
+            # send_failure broadcasts to Discord, Telegram, and email.
+            # The text is informational, but this is the correct broadcast method.
+            self.alerter.send_failure(f"[INFO] {text}")
+        except Exception as exc:
+            logger.warning("Summary alert failed: %s", exc)
 
     def _alert_failure(self, result: Dict[str, Any]) -> None:
         if self.alerter:

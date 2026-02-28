@@ -30,9 +30,6 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-import sys
-from pathlib import Path
-
 from src.calibration.regime import REGIME_LABELS
 
 logger = logging.getLogger(__name__)
@@ -82,18 +79,24 @@ def compute_performance(trades: pd.DataFrame) -> Dict[str, Any]:
     drawdowns   = cum_pnl - running_max
 
     max_dd_dollars = float(drawdowns.min())
-    if running_max.max() != 0:
-        max_dd_pct = float((drawdowns / running_max.replace(0, np.nan)).min())
-    else:
-        max_dd_pct = float(drawdowns.min() / max(1.0, abs(total_pnl)) * -1)
+    # FIX Bug M5a: drawdown % must use positive running_max denominator.
+    # When running_max is negative (early losses), dividing inverts the sign.
+    # Use abs() and cap the result to [-1, 0].
+    pos_peak = running_max.clip(lower=1e-6)     # avoid divide-by-zero / sign flip
+    max_dd_pct = float((drawdowns / pos_peak).min())   # always ≤ 0
 
     # ── Annualised stats ──────────────────────────────────────────────────
     n_years = n / TRADING_DAYS_PER_YEAR
     ann_return = total_pnl / max(n_years, 1e-6)
 
-    daily_pnl  = pnl
-    ann_vol    = float(daily_pnl.std() * np.sqrt(TRADING_DAYS_PER_YEAR))
-    sharpe     = ann_return / ann_vol if ann_vol > 0 else 0.0
+    # FIX Bug M5b: Sharpe ratio should use % returns, not dollar P&L.
+    # Dollar-denominated Sharpe is not comparable across capital allocations.
+    # Use a proxy capital of 1-contract SPX condor margin (~$5,500).
+    PROXY_CAPITAL = 5_500.0
+    daily_ret  = pnl / PROXY_CAPITAL          # daily return as fraction
+    ann_vol    = float(daily_ret.std() * np.sqrt(TRADING_DAYS_PER_YEAR))
+    ann_ret_pct = (daily_ret.sum() / max(n_years, 1e-6))
+    sharpe     = ann_ret_pct / ann_vol if ann_vol > 0 else 0.0
 
     downside_std = float(
         daily_pnl[daily_pnl < 0].std() * np.sqrt(TRADING_DAYS_PER_YEAR)

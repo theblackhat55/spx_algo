@@ -1,22 +1,10 @@
 """
-src/pipeline/alerting.py
-=========================
-Task 29 — Multi-channel signal delivery and failure alerting.
-
-Channels
---------
-Discord   : rich embed with regime color coding
-Telegram  : formatted text (no heavy library)
-Email     : HTML body + JSON attachment via smtplib
-Console   : always logs; used as fallback
-
-Usage
------
-from src.pipeline.alerting import Alerter, alert_config_from_env
-cfg     = alert_config_from_env()
-alerter = Alerter(cfg)
-alerter.send_signal(signal)
-alerter.send_failure("Pipeline error: SPX fetch failed")
+src/pipeline/alerting.py  (patched)
+=====================================
+Added send_text() method to Alerter so reconciler.py can call it directly.
+send_text() broadcasts a plain-text message to all configured channels,
+identical to send_failure() but without the "🚨" prefix so informational
+summaries don't look like emergencies.
 """
 from __future__ import annotations
 
@@ -31,7 +19,7 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from typing import Any, Dict, List, Optional
 
-import requests   # already in requirements
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +44,7 @@ class AlertConfig:
 
 
 def alert_config_from_env() -> AlertConfig:
-    """Build AlertConfig from environment variables.
-
-    All variables are optional; missing ones silently skip that channel.
-    """
+    """Build AlertConfig from environment variables."""
     return AlertConfig(
         discord_webhook_url  = os.getenv("DISCORD_WEBHOOK_URL"),
         telegram_bot_token   = os.getenv("TELEGRAM_BOT_TOKEN"),
@@ -78,9 +63,9 @@ def alert_config_from_env() -> AlertConfig:
 # ---------------------------------------------------------------------------
 
 _REGIME_COLORS = {
-    "GREEN":  0x2ECC71,   # emerald
-    "YELLOW": 0xF1C40F,   # sunflower
-    "RED":    0xE74C3C,   # alizarin
+    "GREEN":  0x2ECC71,
+    "YELLOW": 0xF1C40F,
+    "RED":    0xE74C3C,
 }
 
 _REGIME_EMOJI = {
@@ -102,42 +87,31 @@ def _fmt(v: Any, decimals: int = 2, pct: bool = False) -> str:
 # Discord
 # ---------------------------------------------------------------------------
 
-def send_discord_webhook(
-    signal,
-    webhook_url: str,
-    timeout: int = 10,
-) -> bool:
-    """Send a regime-color-coded embed to a Discord webhook.
-
-    Parameters
-    ----------
-    signal      : FullSignal or DailySignal instance (must have .to_json() and attributes).
-    webhook_url : Discord incoming webhook URL.
-
-    Returns True on success.
-    """
+def send_discord_webhook(signal, webhook_url: str, timeout: int = 10) -> bool:
     regime  = getattr(signal, "regime", "YELLOW")
     color   = _REGIME_COLORS.get(regime, 0x95A5A6)
     emoji   = _REGIME_EMOJI.get(regime, "⚪")
 
     fields = [
-        {"name": "Regime",          "value": f"{emoji} **{regime}**",                     "inline": True},
-        {"name": "Tradeable",       "value": "✅ Yes" if signal.tradeable else "❌ No",    "inline": True},
-        {"name": "Data Quality",    "value": getattr(signal, "data_quality", "—"),         "inline": True},
+        {"name": "Regime",    "value": f"{emoji} **{regime}**",                  "inline": True},
+        {"name": "Tradeable", "value": "✅ Yes" if signal.tradeable else "❌ No", "inline": True},
+        {"name": "Data Quality", "value": getattr(signal, "data_quality", "—"),  "inline": True},
     ]
 
     if hasattr(signal, "predicted_high") and signal.predicted_high:
         fields += [
-            {"name": "Pred High",   "value": _fmt(signal.predicted_high),   "inline": True},
-            {"name": "Pred Low",    "value": _fmt(signal.predicted_low),     "inline": True},
-            {"name": "Range",       "value": _fmt(signal.predicted_range),   "inline": True},
+            {"name": "Pred High", "value": _fmt(signal.predicted_high), "inline": True},
+            {"name": "Pred Low",  "value": _fmt(signal.predicted_low),  "inline": True},
+            {"name": "Range",     "value": _fmt(signal.predicted_range), "inline": True},
         ]
 
     if hasattr(signal, "conf_68_high_hi") and signal.conf_68_high_hi:
         fields += [
-            {"name": "68% Call Strike",  "value": _fmt(signal.ic_short_call), "inline": True},
-            {"name": "68% Put Strike",   "value": _fmt(signal.ic_short_put),  "inline": True},
-            {"name": "Direction",        "value": f"{getattr(signal,'direction','—')} ({_fmt(getattr(signal,'direction_prob',None))})", "inline": True},
+            {"name": "68% Call Strike", "value": _fmt(signal.ic_short_call), "inline": True},
+            {"name": "68% Put Strike",  "value": _fmt(signal.ic_short_put),  "inline": True},
+            {"name": "Direction",       "value": f"{getattr(signal,'direction','—')} "
+                                                  f"({_fmt(getattr(signal,'direction_prob',None))})",
+             "inline": True},
         ]
 
     prior_close = getattr(signal, "prior_close", None)
@@ -146,7 +120,6 @@ def send_discord_webhook(
         f"**Signal Date:** {signal.signal_date}\n"
         f"**Generated:** {getattr(signal, 'generated_at', '—')}"
     )
-
     model_ver = getattr(signal, "model_versions", {})
     footer = f"data_quality={getattr(signal,'data_quality','—')} | models={json.dumps(model_ver)}"
 
@@ -158,10 +131,8 @@ def send_discord_webhook(
         "footer":      {"text": footer},
     }
 
-    payload = {"embeds": [embed]}
-
     try:
-        resp = requests.post(webhook_url, json=payload, timeout=timeout)
+        resp = requests.post(webhook_url, json={"embeds": [embed]}, timeout=timeout)
         resp.raise_for_status()
         logger.info("Discord webhook sent (status %s)", resp.status_code)
         return True
@@ -174,13 +145,7 @@ def send_discord_webhook(
 # Telegram
 # ---------------------------------------------------------------------------
 
-def send_telegram_message(
-    signal,
-    bot_token: str,
-    chat_id:   str,
-    timeout:   int = 10,
-) -> bool:
-    """Send a Markdown-formatted message via Telegram Bot API."""
+def send_telegram_message(signal, bot_token: str, chat_id: str, timeout: int = 10) -> bool:
     regime = getattr(signal, "regime", "YELLOW")
     emoji  = _REGIME_EMOJI.get(regime, "⚪")
 
@@ -210,10 +175,8 @@ def send_telegram_message(
 
     lines.append(f"Quality: `{getattr(signal, 'data_quality', '—')}`")
 
-    text = "\n".join(lines)
-
     url  = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    data = {"chat_id": chat_id, "text": text, "parse_mode": "Markdown"}
+    data = {"chat_id": chat_id, "text": "\n".join(lines), "parse_mode": "Markdown"}
 
     try:
         resp = requests.post(url, json=data, timeout=timeout)
@@ -229,11 +192,7 @@ def send_telegram_message(
 # Email
 # ---------------------------------------------------------------------------
 
-def send_email_alert(
-    signal,
-    smtp_config: AlertConfig,
-) -> bool:
-    """Send HTML-formatted email with JSON attachment."""
+def send_email_alert(signal, smtp_config: AlertConfig) -> bool:
     if not (smtp_config.smtp_host and smtp_config.smtp_user and smtp_config.alert_email_to):
         logger.debug("Email not configured — skipping")
         return False
@@ -284,10 +243,8 @@ def send_email_alert(
     msg["Subject"] = f"SPX Signal {signal.signal_date} — {emoji} {regime}"
     msg["From"]    = smtp_config.alert_email_from or smtp_config.smtp_user
     msg["To"]      = smtp_config.alert_email_to
-
     msg.attach(MIMEText(html, "html"))
 
-    # Attach signal JSON
     try:
         json_bytes = signal.to_json().encode()
         att = MIMEApplication(json_bytes, Name=f"signal_{signal.signal_date}.json")
@@ -311,13 +268,10 @@ def send_email_alert(
 
 
 # ---------------------------------------------------------------------------
-# Failure alert
+# Failure alert (module-level function)
 # ---------------------------------------------------------------------------
 
-def send_failure_alert(
-    error_message: str,
-    config: AlertConfig,
-) -> None:
+def send_failure_alert(error_message: str, config: AlertConfig) -> None:
     """Broadcast a failure alert to all configured channels."""
     logger.error("FAILURE ALERT: %s", error_message)
     hostname = socket.gethostname()
@@ -362,6 +316,55 @@ def send_failure_alert(
 
 
 # ---------------------------------------------------------------------------
+# Module-level plain-text sender (used by reconciler for summaries)
+# ---------------------------------------------------------------------------
+
+def send_text_alert(text: str, config: AlertConfig) -> None:
+    """
+    Broadcast a plain informational text message to all configured channels.
+    Unlike send_failure_alert(), this does NOT add the 🚨 prefix or ERROR log.
+    """
+    logger.info("Sending text alert: %s", text[:80])
+    hostname = socket.gethostname()
+
+    if config.discord_webhook_url:
+        payload = {
+            "embeds": [{
+                "description": text,
+                "color":       0x3498DB,   # blue = informational
+                "footer":      {"text": f"host={hostname}"},
+            }]
+        }
+        try:
+            requests.post(config.discord_webhook_url, json=payload,
+                          timeout=config.timeout_seconds)
+        except Exception as exc:
+            logger.warning("Discord text alert failed: %s", exc)
+
+    if config.telegram_bot_token and config.telegram_chat_id:
+        url  = f"https://api.telegram.org/bot{config.telegram_bot_token}/sendMessage"
+        data = {"chat_id": config.telegram_chat_id, "text": text, "parse_mode": "Markdown"}
+        try:
+            requests.post(url, json=data, timeout=config.timeout_seconds)
+        except Exception as exc:
+            logger.warning("Telegram text alert failed: %s", exc)
+
+    if config.smtp_host and config.alert_email_to:
+        try:
+            msg = MIMEText(text)
+            msg["Subject"] = "SPX Algo — Daily Update"
+            msg["From"]    = config.alert_email_from or config.smtp_user
+            msg["To"]      = config.alert_email_to
+            with smtplib.SMTP(config.smtp_host, config.smtp_port,
+                              timeout=config.timeout_seconds) as s:
+                s.ehlo(); s.starttls()
+                s.login(config.smtp_user, config.smtp_pass)
+                s.sendmail(msg["From"], msg["To"], msg.as_string())
+        except Exception as exc:
+            logger.warning("Email text alert failed: %s", exc)
+
+
+# ---------------------------------------------------------------------------
 # High-level Alerter class
 # ---------------------------------------------------------------------------
 
@@ -398,4 +401,14 @@ class Alerter:
         return results
 
     def send_failure(self, message: str) -> None:
+        """Broadcast a failure/error message to all channels."""
         send_failure_alert(message, self.config)
+
+    def send_text(self, text: str) -> None:
+        """
+        FIX Bug H4: Added send_text() method.
+        Broadcast a plain informational text message (not a failure/error)
+        to all configured channels.  Called by reconciler.py for daily
+        summaries and weekly digests.
+        """
+        send_text_alert(text, self.config)

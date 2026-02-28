@@ -113,11 +113,13 @@ RETRAIN_FREQUENCY_DAYS: int = 21
 HMM_N_STATES: int = 4
 
 #: VIX Z-score thresholds
-VIX_ZSCORE_RED:    float = 2.0
+# FIX Bug M1: align with regime.py defaults (vix_red_z=3.0, vix_yellow_z=1.5)
+VIX_ZSCORE_RED:    float = 3.0
 VIX_ZSCORE_YELLOW: float = 1.5
 
 #: ATR expansion ratio thresholds  (ATR_5 / ATR_60)
-ATR_EXPAND_RED:    float = 2.0
+# FIX Bug M1: align with regime.py defaults (atr_red_ratio=2.5, atr_yellow_ratio=1.5)
+ATR_EXPAND_RED:    float = 2.5
 ATR_EXPAND_YELLOW: float = 1.5
 
 #: VVIX level thresholds

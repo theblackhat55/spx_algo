@@ -353,7 +353,11 @@ def assemble_signal(
 
     predicted_high = (prior_close * (1 + pred_high_pct)) if pred_high_pct is not None else None
     predicted_low  = (prior_close * (1 + pred_low_pct))  if pred_low_pct  is not None else None
-    predicted_range = (predicted_high - predicted_low) if (predicted_high and predicted_low) else None
+    predicted_range = (
+        (predicted_high - predicted_low)
+        if (predicted_high is not None and predicted_low is not None)
+        else None
+    )
 
     # Conformal intervals — convert pct-deviation rows to absolute levels
     def _abs(df, col, base):
@@ -701,10 +705,26 @@ class SignalGenerator:
         details: Dict[str, Any] = {}
         try:
             from src.calibration.regime import RegimeDetector, Regime
+            # Bug 11 fix: wire settings.py threshold constants into RegimeDetector
+            # so the regime thresholds are consistent between settings.py and regime.py.
+            try:
+                from config.settings import (
+                    VIX_ZSCORE_RED, VIX_ZSCORE_YELLOW,
+                    ATR_EXPAND_RED, ATR_EXPAND_YELLOW,
+                )
+            except Exception:
+                VIX_ZSCORE_RED    = 3.0   # match regime.py defaults if settings unavailable
+                VIX_ZSCORE_YELLOW = 1.5
+                ATR_EXPAND_RED    = 2.5
+                ATR_EXPAND_YELLOW = 1.5
             rd = RegimeDetector(
                 use_hmm=True, use_garch=False,
                 hmm_states=4,
-                random_state=self.seed,   # pass seed directly — no global mutation
+                random_state=self.seed,
+                vix_red_z=VIX_ZSCORE_RED,
+                vix_yellow_z=VIX_ZSCORE_YELLOW,
+                atr_red_ratio=ATR_EXPAND_RED,
+                atr_yellow_ratio=ATR_EXPAND_YELLOW,
             )
             regime_series = rd.fit_predict(spx_df, vix_df)
             reg_int = int(regime_series.iloc[-1])

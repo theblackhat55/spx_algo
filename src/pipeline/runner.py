@@ -345,7 +345,8 @@ class PipelineRunner:
                 from src.models.base_model import BaseModel
                 model = BaseModel.load(model_path)
                 prob  = float(model.predict_proba(features.iloc[[-1]])[0, 1])
-                key   = f"prob_{target}"
+                # Strip leading "next_" so keys match DailySignal field names
+                key   = f"prob_{target.replace('next_', '', 1)}"
                 result[key] = prob
             except Exception as e:
                 notes.append(f"Classifier predict failed ({target}): {e}")
