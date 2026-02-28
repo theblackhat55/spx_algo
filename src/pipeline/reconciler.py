@@ -333,16 +333,17 @@ class Reconciler:
 
     def _send_summary(self, text: str) -> None:
         """
-        FIX Bug H4: Alerter has no send_text(); route summary messages
-        through send_failure() with an INFO prefix so they reach all channels.
+        Route informational summaries through send_text() (no 🚨 prefix).
+        Falls back to send_failure() if send_text is not available.
         Swallows exceptions so a missing webhook never kills reconciliation.
         """
         if not self.alerter:
             return
         try:
-            # send_failure broadcasts to Discord, Telegram, and email.
-            # The text is informational, but this is the correct broadcast method.
-            self.alerter.send_failure(f"[INFO] {text}")
+            if hasattr(self.alerter, "send_text"):
+                self.alerter.send_text(text)
+            else:
+                self.alerter.send_failure(f"[INFO] {text}")
         except Exception as exc:
             logger.warning("Summary alert failed: %s", exc)
 

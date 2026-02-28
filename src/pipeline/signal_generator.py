@@ -364,8 +364,10 @@ def assemble_signal(
         if df is None or col not in df.columns:
             return None
         v = float(df[col].iloc[-1])
-        return base * (1 + v) if abs(v) < 1 else v   # handle already-absolute
-
+        # Conformal predictor always outputs % deviations (e.g. 0.012 for +1.2%).
+        # Always convert: absolute_level = base * (1 + pct_deviation).
+        # The old 'abs(v) < 1' heuristic was fragile for near-zero pct values.
+        return base * (1 + v)
     h68lo = _abs(intervals_high, "lower_68", prior_close)
     h68hi = _abs(intervals_high, "upper_68", prior_close)
     h90lo = _abs(intervals_high, "lower_90", prior_close)

@@ -50,6 +50,7 @@ LOG_COLUMNS = [
     "upper_90_low",
     "data_quality",
     "model_version_hash",
+    "prior_close",
     # Outcome fields (filled next day)
     "actual_high",
     "actual_low",
@@ -110,6 +111,7 @@ class PaperTradeLogger:
             "upper_90_low":        signal.get("upper_90_low", ""),
             "data_quality":        signal.get("data_quality", "ok"),
             "model_version_hash":  signal.get("model_version_hash", ""),
+            "prior_close":         signal.get("prior_close", ""),
         })
         self._upsert(date_str, row)
 
@@ -164,7 +166,18 @@ class PaperTradeLogger:
         else:
             # Estimate credit: use prior close from signal if available,
             # otherwise fall back to a generic 0.5% credit (conservative).
-            prior_close = _f("predicted_high")   # proxy; actual close not stored
+            # Use actual prior_close persisted from the signal.
+            # Fallback chain: prior_close column → actual_close from prior row
+            # → generic 0.5% credit (5.0 pts) if neither is available.
+            prior_close = _f("prior_close")
+            if np.isnan(prior_close) or prior_close <= 0:
+                # Second fallback: use the previous row's actual_close if present
+                row_pos = df.index.get_loc(idx)
+                if row_pos > 0:
+                    prev_close = pd.to_numeric(
+                        df.iloc[row_pos - 1].get("actual_close", np.nan), errors="coerce"
+                    )
+                    prior_close = float(prev_close) if not np.isnan(prev_close) else np.nan
             if np.isnan(prior_close) or prior_close <= 0:
                 # Conservative fallback: 0.5% of a typical SPX level
                 credit_pts = 5.0

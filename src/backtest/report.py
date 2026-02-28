@@ -98,12 +98,14 @@ def compute_performance(trades: pd.DataFrame) -> Dict[str, Any]:
     ann_ret_pct = (daily_ret.sum() / max(n_years, 1e-6))
     sharpe     = ann_ret_pct / ann_vol if ann_vol > 0 else 0.0
 
+    # FIX Bug R1: daily_pnl was renamed to daily_ret during the Sharpe fix.
+    # Also align Sortino and Calmar to use pct-based metrics for comparability.
     downside_std = float(
-        daily_pnl[daily_pnl < 0].std() * np.sqrt(TRADING_DAYS_PER_YEAR)
-    ) if (daily_pnl < 0).any() else 1.0
-    sortino = ann_return / downside_std if downside_std > 0 else 0.0
+        daily_ret[daily_ret < 0].std() * np.sqrt(TRADING_DAYS_PER_YEAR)
+    ) if (daily_ret < 0).any() else 1.0
+    sortino = ann_ret_pct / downside_std if downside_std > 0 else 0.0
 
-    calmar  = ann_return / abs(max_dd_dollars) if max_dd_dollars != 0 else 0.0
+    calmar  = ann_ret_pct / abs(max_dd_pct) if max_dd_pct != 0 else 0.0
 
     # ── Per-regime breakdown ──────────────────────────────────────────────
     regime_rows = []
