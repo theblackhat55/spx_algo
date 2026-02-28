@@ -187,9 +187,11 @@ class PipelineRunner:
         # ── Step 8: Strike levels ─────────────────────────────────────────
         call_strike = intervals.get("upper_90")
         put_strike  = intervals.get("lower_90")
-        if call_strike and put_strike:
-            call_strike = prior_close * (1 + call_strike) if abs(call_strike) < 1 else call_strike
-            put_strike  = prior_close * (1 + put_strike)  if abs(put_strike)  < 1 else put_strike
+        # FIX Bug N1: use explicit is-not-None guard (avoids skipping 0.0);
+        # always apply base*(1+v) — conformal predictor always returns % deviations.
+        if call_strike is not None and put_strike is not None:
+            call_strike = prior_close * (1 + call_strike)
+            put_strike  = prior_close * (1 + put_strike)
 
         tradeable = (regime_str != "RED")
         if not tradeable:
@@ -439,6 +441,22 @@ def replay_date_check(
 # ---------------------------------------------------------------------------
 
 def _next_trading_day(last_date: pd.Timestamp) -> pd.Timestamp:
-    """Return the next business day after last_date."""
-    offset = pd.tseries.offsets.BDay(1)
-    return last_date + offset
+    """Return the next *market* trading day after last_date.
+
+    FIX Bug N2: pandas BDay does not exclude NYSE holidays.
+    Reuses _us_market_holidays() from live_fetcher.py — same source
+    as the broker.py fix (B2) — so holiday lists stay in sync.
+    """
+    from datetime import timedelta
+    from src.data.live_fetcher import _us_market_holidays
+
+    target = last_date.date() + timedelta(days=1)
+    while True:
+        # Skip weekends
+        while target.weekday() >= 5:
+            target += timedelta(days=1)
+        # Skip market holidays
+        if target not in _us_market_holidays(target.year):
+            break
+        target += timedelta(days=1)
+    return pd.Timestamp(target)

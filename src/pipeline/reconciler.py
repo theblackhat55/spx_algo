@@ -188,15 +188,18 @@ class Reconciler:
 
         prior_close = _safe_float(signal.get("prior_close"))
 
-        # Predicted values — prefer _pct keys; fall back to interval midpoints
-        pred_high_pct = _safe_float(
-            signal.get("predicted_high_pct")
-            or signal.get("pred_high")
-        )
-        pred_low_pct = _safe_float(
-            signal.get("predicted_low_pct")
-            or signal.get("pred_low")
-        )
+        # Predicted values — prefer _pct keys (FullSignal); fall back to runner DailySignal keys.
+        # FIX Bug N6: use explicit None check so pred_high_pct=0.0 is not treated as falsy
+        # (a plain `or` would fall through to pred_high which might be an absolute price level).
+        _v = signal.get("pred_high_pct")
+        if _v is None:
+            _v = signal.get("predicted_high_pct") or signal.get("pred_high")
+        pred_high_pct = _safe_float(_v)
+
+        _v = signal.get("pred_low_pct")
+        if _v is None:
+            _v = signal.get("predicted_low_pct") or signal.get("pred_low")
+        pred_low_pct = _safe_float(_v)
 
         actual_high = float(actual["High"])
         actual_low  = float(actual["Low"])
@@ -237,12 +240,12 @@ class Reconciler:
                              else actual_high,
             actual_low     = actual_low_pct  if (not np.isnan(prior_close) and prior_close > 0)
                              else actual_low,
-            lower_68_high  = _safe_float(signal.get("lower_68_high", 0) or 0),
-            upper_68_high  = _safe_float(signal.get("upper_68_high", 1e9) or 1e9),
-            lower_68_low   = _safe_float(signal.get("lower_68_low", 0) or 0),
-            upper_68_low   = _safe_float(signal.get("upper_68_low", 1e9) or 1e9),
-            lower_90_high  = _safe_float(signal.get("lower_90_high") or signal.get("lower_90")),
-            upper_90_high  = _safe_float(signal.get("upper_90_high") or signal.get("upper_90")),
+            lower_68_high  = _safe_float(signal.get("conf_68_high_lo") or signal.get("lower_68_high") or 0),
+            upper_68_high  = _safe_float(signal.get("conf_68_high_hi") or signal.get("upper_68_high") or 1e9),
+            lower_68_low   = _safe_float(signal.get("conf_68_low_lo")  or signal.get("lower_68_low")  or 0),
+            upper_68_low   = _safe_float(signal.get("conf_68_low_hi")  or signal.get("upper_68_low")  or 1e9),
+            lower_90_high  = _safe_float(signal.get("conf_90_high_lo") or signal.get("lower_90_high") or signal.get("lower_90")),
+            upper_90_high  = _safe_float(signal.get("conf_90_high_hi") or signal.get("upper_90_high") or signal.get("upper_90")),
             condor_win     = -1,   # will be set from paper_logger if available
             regime         = regime,
         )

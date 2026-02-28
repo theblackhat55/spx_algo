@@ -93,22 +93,24 @@ class PaperTradeLogger:
         row = {col: "" for col in LOG_COLUMNS}
         row.update({
             "date":                str(date_str),
-            "predicted_high":      signal.get("predicted_high_pct", ""),
-            "predicted_low":       signal.get("predicted_low_pct", ""),
+            "predicted_high":      signal.get("predicted_high_pct", "") or signal.get("pred_high_pct", ""),
+            "predicted_low":       signal.get("predicted_low_pct",  "") or signal.get("pred_low_pct",  ""),
             "predicted_direction": signal.get("direction", ""),
             "regime":              signal.get("regime", ""),
-            "call_strike":         signal.get("call_strike", ""),
-            "put_strike":          signal.get("put_strike", ""),
-            "long_call_strike":    signal.get("long_call_strike", ""),
-            "long_put_strike":     signal.get("long_put_strike", ""),
-            "lower_68_high":       signal.get("lower_68_high", ""),
-            "upper_68_high":       signal.get("upper_68_high", ""),
-            "lower_68_low":        signal.get("lower_68_low", ""),
-            "upper_68_low":        signal.get("upper_68_low", ""),
-            "lower_90_high":       signal.get("lower_90_high", ""),
-            "upper_90_high":       signal.get("upper_90_high", ""),
-            "lower_90_low":        signal.get("lower_90_low", ""),
-            "upper_90_low":        signal.get("upper_90_low", ""),
+            # FIX Bug N5: FullSignal uses ic_short_call/ic_long_call etc.; DailySignal uses call_strike/put_strike.
+            "call_strike":         signal.get("ic_short_call",   "") or signal.get("call_strike",      ""),
+            "put_strike":          signal.get("ic_short_put",    "") or signal.get("put_strike",       ""),
+            "long_call_strike":    signal.get("ic_long_call",    "") or signal.get("long_call_strike", ""),
+            "long_put_strike":     signal.get("ic_long_put",     "") or signal.get("long_put_strike",  ""),
+            # FIX Bug N5: FullSignal uses conf_68_high_lo / conf_68_high_hi etc.
+            "lower_68_high":       signal.get("conf_68_high_lo", "") or signal.get("lower_68_high",   ""),
+            "upper_68_high":       signal.get("conf_68_high_hi", "") or signal.get("upper_68_high",   ""),
+            "lower_68_low":        signal.get("conf_68_low_lo",  "") or signal.get("lower_68_low",    ""),
+            "upper_68_low":        signal.get("conf_68_low_hi",  "") or signal.get("upper_68_low",    ""),
+            "lower_90_high":       signal.get("conf_90_high_lo", "") or signal.get("lower_90_high",   ""),
+            "upper_90_high":       signal.get("conf_90_high_hi", "") or signal.get("upper_90_high",   ""),
+            "lower_90_low":        signal.get("conf_90_low_lo",  "") or signal.get("lower_90_low",    ""),
+            "upper_90_low":        signal.get("conf_90_low_hi",  "") or signal.get("upper_90_low",    ""),
             "data_quality":        signal.get("data_quality", "ok"),
             "model_version_hash":  signal.get("model_version_hash", ""),
             "prior_close":         signal.get("prior_close", ""),
@@ -200,13 +202,14 @@ class PaperTradeLogger:
                     wing_width = min(wing_width, put_k - long_put)
                 call_intrusion = min(max(actual_high - call_k, 0.0), wing_width)
                 put_intrusion  = min(max(put_k - actual_low,  0.0), wing_width)
-                # Take the worse breached leg (not additive; max loss from one side)
-                worst_intrusion = max(call_intrusion, put_intrusion)
-                condor_result  = "loss"
-                condor_pnl     = (credit_pts - worst_intrusion - friction) * 100
-                # P&L is always between -(wing_width - credit)*100 and 0 for a loss
-                max_loss = -(wing_width - credit_pts) * 100
-                condor_pnl = max(condor_pnl, max_loss)
+                # FIX Bug N3: match engine.py — intrusions are ADDITIVE (both legs can
+                # breach on the same day). Using max() understated losses on double-breach days.
+                total_intrusion = call_intrusion + put_intrusion
+                condor_result   = "loss"
+                condor_pnl      = (credit_pts - total_intrusion - friction) * 100
+                # Max loss = both wings fully breached (2 × wing_width − credit)
+                max_loss        = -(2 * wing_width - credit_pts) * 100
+                condor_pnl      = max(condor_pnl, max_loss)
 
         # Coverage flags
         def _cov(lo_col, hi_col, val):
