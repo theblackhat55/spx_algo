@@ -54,6 +54,7 @@ def _make_signal(d: str = "2024-01-15") -> dict:
         "predicted_low_pct": -0.005,
         "direction":          "UP",
         "regime":             "GREEN",
+        "prior_close":        4500.0,   # required for pct-error computation
         "call_strike":        4530.0,
         "put_strike":         4470.0,
         "long_call_strike":   4580.0,
