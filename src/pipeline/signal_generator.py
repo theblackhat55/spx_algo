@@ -270,7 +270,19 @@ def _fit_regression_model(
     if model_dir is not None:
         loaded = _load_model_artifact(Path(model_dir), target.name or "target")
         if loaded is not None:
-            return loaded
+            # FIX C2: raw sklearn/CatBoost/XGBoost artifacts may lack .task.
+            # ConformalPredictor checks model.task and raises AttributeError
+            # without this guard. Inject the attribute rather than discarding
+            # an otherwise valid model.
+            if not hasattr(loaded, "task"):
+                loaded.task = "regression"
+                logger.debug("Injected .task='regression' on loaded artifact %s",
+                             type(loaded).__name__)
+            if not hasattr(loaded, "predict"):
+                logger.warning("Loaded artifact %s missing predict() — discarding",
+                               type(loaded).__name__)
+            else:
+                return loaded
 
     # ── 2. Fallback: fit stacking ensemble in-process ─────────────────────
     valid = target.dropna()

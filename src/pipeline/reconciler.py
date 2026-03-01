@@ -231,6 +231,34 @@ class Reconciler:
         # 5. Update drift detector
         regime = signal.get("regime", "UNKNOWN")
 
+        # FIX C3: FullSignal stores conformal bounds as ABSOLUTE SPX price levels
+        # (e.g. conf_68_high_lo = 6902.74) but drift_detector.update() compares
+        # them directly to actual_high which is a % move (e.g. 0.0065).
+        # Convert absolute bounds to % moves using prior_close before passing.
+        def _abs_to_pct(raw_val, fallback):
+            """Convert an absolute price bound to a % deviation from prior_close.
+            Returns fallback unchanged if prior_close is unavailable or if the
+            value already looks like a percentage (abs < 10)."""
+            v = _safe_float(raw_val)
+            if v is None or np.isnan(v):
+                return fallback
+            if not np.isnan(prior_close) and prior_close > 0 and abs(v) >= 10:
+                return (v - prior_close) / prior_close
+            return v   # already a % or sentinel
+
+        lo68h = _abs_to_pct(
+            signal.get("conf_68_high_lo") or signal.get("lower_68_high"), 0.0)
+        hi68h = _abs_to_pct(
+            signal.get("conf_68_high_hi") or signal.get("upper_68_high"), 1e9)
+        lo68l = _abs_to_pct(
+            signal.get("conf_68_low_lo")  or signal.get("lower_68_low"),  0.0)
+        hi68l = _abs_to_pct(
+            signal.get("conf_68_low_hi")  or signal.get("upper_68_low"),  1e9)
+        lo90h = _abs_to_pct(
+            signal.get("conf_90_high_lo") or signal.get("lower_90_high") or signal.get("lower_90"), None)
+        hi90h = _abs_to_pct(
+            signal.get("conf_90_high_hi") or signal.get("upper_90_high") or signal.get("upper_90"), None)
+
         # drift_detector.update() expects raw % move predictions
         drift_row = self.drift_detector.update(
             signal_date    = trade_date,
@@ -240,12 +268,12 @@ class Reconciler:
                              else actual_high,
             actual_low     = actual_low_pct  if (not np.isnan(prior_close) and prior_close > 0)
                              else actual_low,
-            lower_68_high  = _safe_float(signal.get("conf_68_high_lo") or signal.get("lower_68_high") or 0),
-            upper_68_high  = _safe_float(signal.get("conf_68_high_hi") or signal.get("upper_68_high") or 1e9),
-            lower_68_low   = _safe_float(signal.get("conf_68_low_lo")  or signal.get("lower_68_low")  or 0),
-            upper_68_low   = _safe_float(signal.get("conf_68_low_hi")  or signal.get("upper_68_low")  or 1e9),
-            lower_90_high  = _safe_float(signal.get("conf_90_high_lo") or signal.get("lower_90_high") or signal.get("lower_90")),
-            upper_90_high  = _safe_float(signal.get("conf_90_high_hi") or signal.get("upper_90_high") or signal.get("upper_90")),
+            lower_68_high  = lo68h,
+            upper_68_high  = hi68h,
+            lower_68_low   = lo68l,
+            upper_68_low   = hi68l,
+            lower_90_high  = lo90h,
+            upper_90_high  = hi90h,
             condor_win     = -1,   # will be set from paper_logger if available
             regime         = regime,
         )
