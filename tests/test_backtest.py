@@ -642,11 +642,15 @@ class TestDeadMansSwitch:
 
     def test_check_false_when_file_missing(self, tmp_path):
         from src.pipeline.scheduler import DeadMansSwitch
+        from datetime import date
         signal_dir = tmp_path / "signals"
         signal_dir.mkdir()
 
         switch = DeadMansSwitch(signal_dir=signal_dir)
-        assert switch.check() is False
+        # Use a known non-holiday weekday so I3 holiday-skip logic doesn't
+        # short-circuit to True before the file-missing check runs.
+        trading_day = date(2024, 10, 14)  # Columbus Day is NOT a NYSE holiday
+        assert switch.check(_today=trading_day) is False
 
     def test_signal_path_contains_today(self, tmp_path):
         from src.pipeline.scheduler import DeadMansSwitch
@@ -660,11 +664,13 @@ class TestDeadMansSwitch:
         configured — it should log the alert and return False gracefully.
         """
         from src.pipeline.scheduler import DeadMansSwitch
+        from datetime import date
         signal_dir = tmp_path / "signals"
         signal_dir.mkdir()
         switch = DeadMansSwitch(signal_dir=signal_dir)
-        # Should not raise
-        result = switch.check()
+        # Use a known trading day so the holiday guard doesn't hide the False path.
+        trading_day = date(2024, 10, 14)  # Columbus Day is NOT a NYSE holiday
+        result = switch.check(_today=trading_day)
         assert result is False
 
 

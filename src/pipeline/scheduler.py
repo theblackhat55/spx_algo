@@ -107,13 +107,30 @@ class DeadMansSwitch:
         return self.today_signal_path().exists()
 
     # ------------------------------------------------------------------
-    def check(self) -> bool:
+    def check(self, _today=None) -> bool:
         """
         Check if today's signal exists.
 
-        Returns True if OK, False if the switch fires (signal missing).
-        Fires alerts on failure.
+        FIX I3: skip the dead-man check on weekends and market holidays—the
+        pipeline never runs on those days so the missing signal is expected.
+
+        Returns True if OK (signal present OR non-trading day).
+        Returns False and fires alerts only on a real trading day miss.
+
+        Args:
+            _today: Override today's date (for unit-testing).  Accepts a
+                    datetime.date object.  Defaults to date.today().
         """
+        from datetime import date as _date, timedelta
+        today = _today if _today is not None else _date.today()
+        try:
+            from src.data.live_fetcher import _us_market_holidays
+            if today.weekday() >= 5 or today in _us_market_holidays(today.year):
+                logger.info("Dead-man check skipped — non-trading day (%s)", today)
+                return True
+        except Exception:
+            pass   # if holiday check fails, fall through to normal logic
+
         if self.signal_exists():
             logger.info("Dead-man check: signal OK — %s", self.today_signal_path())
             return True
@@ -205,8 +222,59 @@ class DailyScheduler:
         FIX Bug C3: use SignalGenerator.generate() instead of the stub
         PipelineRunner.run() which uses hardcoded conformal intervals.
         Falls back to PipelineRunner if SignalGenerator is unavailable.
+
+        FIX C1: validate that raw data is current before generating a signal.
+        If spx_df.index[-1].date() < today, the parquet files were not
+        refreshed by the data-fetch timer. The pipeline will call the live
+        fetcher + feature builder automatically, then mark data_quality
+        DEGRADED and tradeable=False if the refresh also fails.
         """
         logger.info("Scheduler: starting signal generation.")
+        try:
+            # C1: Ensure raw data is fresh — attempt a live refresh if stale
+            from src.data.live_fetcher import run_daily_fetch
+            from src.data.validator   import validate_market_open
+            from src.features.builder import build_feature_matrix
+            from datetime import date as _date
+            import pandas as pd
+            from pathlib import Path
+            try:
+                from config.settings import RAW_DATA_DIR
+                raw_dir = Path(RAW_DATA_DIR)
+            except Exception:
+                raw_dir = Path("data/raw")
+            spx_path = raw_dir / "spx_daily.parquet"
+            needs_refresh = True
+            if spx_path.exists():
+                try:
+                    spx_tmp = pd.read_parquet(spx_path)
+                    spx_tmp.index = pd.to_datetime(spx_tmp.index)
+                    last_row = spx_tmp.index[-1].date()
+                    # Allow yesterday's close on weekends / early runs
+                    today = _date.today()
+                    from src.data.live_fetcher import _us_market_holidays
+                    from datetime import timedelta
+                    prev_day = today - timedelta(days=1)
+                    while prev_day.weekday() >= 5 or prev_day in _us_market_holidays(prev_day.year):
+                        prev_day -= timedelta(days=1)
+                    needs_refresh = last_row < prev_day
+                    if not needs_refresh:
+                        logger.info("C1 data-freshness check OK — last row: %s", last_row)
+                    else:
+                        logger.warning("C1 stale data detected — last row: %s, expected >= %s; refreshing",
+                                       last_row, prev_day)
+                except Exception as exc:
+                    logger.warning("C1 freshness pre-check failed (%s); will attempt refresh", exc)
+            if needs_refresh:
+                try:
+                    run_daily_fetch()
+                    build_feature_matrix()
+                    logger.info("C1 data refresh succeeded")
+                except Exception as exc:
+                    logger.error("C1 data refresh FAILED: %s — signal will use stale data", exc)
+        except ImportError as exc:
+            logger.warning("C1 freshness check skipped (import error: %s)", exc)
+
         try:
             # Primary path: full SignalGenerator with real conformal intervals
             from src.pipeline.signal_generator import SignalGenerator

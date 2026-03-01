@@ -128,9 +128,8 @@ def engineer_targets(
 
     tgt["next_high_pct"]  = _pct_move(next_high, today_cls)
     tgt["next_low_pct"]   = _pct_move(next_low,  today_cls)
-    tgt["next_range_pct"] = _pct_move(next_high - next_low + today_cls,
-                                      today_cls) - 1.0
-    # cleaner range definition
+    # FIX R2: removed duplicate next_range_pct computation; keep only the
+    # cleaner definition: (next_high - next_low) / today_close.
     tgt["next_range_pct"] = (next_high - next_low) / today_cls.replace(0, np.nan)
 
     # ── REGRESSION targets (absolute price levels) ────────────────────────────

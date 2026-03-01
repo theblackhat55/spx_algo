@@ -151,8 +151,22 @@ class PaperTradeLogger:
         pred_low  = _f("predicted_low")
         pred_dir  = df.at[idx, "predicted_direction"]
 
-        high_err  = abs(actual_high - pred_high) if not np.isnan(pred_high) else np.nan
-        low_err   = abs(actual_low  - pred_low)  if not np.isnan(pred_low)  else np.nan
+        # FIX C4: Compute percentage error (predicted_high/low are absolute prices).
+        # prior_close is needed to convert the dollar difference to a % of prior close.
+        # Fallback to raw dollar MAE (pre-fix behaviour) when prior_close is unavailable.
+        _prior_for_err = _f("prior_close")
+        if not np.isnan(pred_high) and not np.isnan(_prior_for_err) and _prior_for_err > 0:
+            high_err = abs(actual_high - pred_high) / _prior_for_err
+        elif not np.isnan(pred_high):
+            high_err = abs(actual_high - pred_high)   # fallback: dollar MAE
+        else:
+            high_err = np.nan
+        if not np.isnan(pred_low) and not np.isnan(_prior_for_err) and _prior_for_err > 0:
+            low_err = abs(actual_low - pred_low) / _prior_for_err
+        elif not np.isnan(pred_low):
+            low_err = abs(actual_low - pred_low)      # fallback: dollar MAE
+        else:
+            low_err = np.nan
 
         dir_correct = (
             # FIX Issue 2: FullSignal.direction is BULLISH/BEARISH/NEUTRAL, not UP/DOWN.

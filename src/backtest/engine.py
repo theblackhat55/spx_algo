@@ -79,7 +79,10 @@ class PositionConfig:
     put_pct_below:  float = 0.010
 
     # ── Wing width (protection leg distance from short strike, in pts) ─────
-    wing_width_pts: float = 20.0    # e.g. buy call at strike + $20
+    # FIX I1: align default wing width with signal_generator (50 pts) and
+    # paper_trade_config.yaml (wing_width_pts: 50).  The old 20-pt default
+    # understated max loss and inflated back-test Sharpe ratios.
+    wing_width_pts: float = 50.0    # e.g. buy call at strike + $50
 
     # ── Credit model ─────────────────────────────────────────────────────
     credit_fraction: float = 0.12   # 12% of 1-day expected move (calibrated)

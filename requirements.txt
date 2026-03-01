@@ -61,4 +61,4 @@ ruff>=0.3.0
 optuna>=3.5.0            # Bayesian hyperparameter optimisation
 pyarrow>=14.0            # Parquet read/write engine (required for all .parquet data files)
 # evidently>=0.4.0       # Optional: feature drift dashboard
-# pyyaml>=6.0            # For reading paper_trade_config.yaml
+pyyaml>=6.0                  # For reading paper_trade_config.yaml (required)
