@@ -36,6 +36,12 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Dependency vulnerability scan (pip-audit)
+        run: |
+          pip install pip-audit --quiet
+          pip-audit --requirement requirements.txt --strict \
+            || { echo "::warning::pip-audit found vulnerabilities — review before live deploy"; true; }
+
       - name: Run leakage gate
         run: |
           python -m pytest tests/test_no_leakage.py -v --tb=short

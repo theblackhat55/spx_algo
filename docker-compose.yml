@@ -1,27 +1,23 @@
 services:
-  algo:
+  scheduler:
     build: .
-    container_name: spx_algo
+    container_name: spx_scheduler
     volumes:
       - ./data:/app/data          # persist raw + processed Parquet files
       - ./output:/app/output      # persist signals, models, trade logs
     env_file:
       - .env
     restart: unless-stopped
-    # Override to run a one-shot signal generation
-    # docker compose run algo python -m src.pipeline.signal_generator
-
-  scheduler:
-    build: .
-    container_name: spx_scheduler
-    volumes:
-      - ./data:/app/data
-      - ./output:/app/output
-    env_file:
-      - .env
-    depends_on:
-      - algo
-    restart: unless-stopped
+    # Security hardening
+    read_only: true               # root filesystem is read-only; data/output via volume mounts
+    tmpfs:
+      - /tmp:size=64m,mode=1777   # writable /tmp for any runtime temp files
+    security_opt:
+      - no-new-privileges:true    # prevent privilege escalation via setuid binaries
+    cap_drop:
+      - ALL                       # drop all Linux capabilities; add back only if needed
+    # Network: no inbound ports needed; outbound-only (yfinance, FRED, Discord, Telegram)
+    # (No 'ports:' entry = nothing exposed to host or internet)
     command: ["python", "-m", "src.pipeline.scheduler"]
     healthcheck:
       test: ["CMD", "python", "-c",
