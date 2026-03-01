@@ -149,17 +149,38 @@ def _model_hash(path: Path) -> str:
 
 def _load_model_artifact(model_dir: Path, target_name: str):
     """
-    Try to load a pre-trained sklearn-compatible model artifact from
-    ``output/models/regressor_{target_name}.pkl``.  Returns the fitted model
-    or None if the artifact does not exist or cannot be loaded.
+    Try to load a pre-trained sklearn-compatible model artifact.
 
-    The weekly retrain runner (src/models/trainer.py) is responsible for
-    writing these artifacts.  If they exist the production signal uses the
-    same model that was validated in walk-forward backtesting — preserving
-    the backtest-matches-production invariant.
+    Searches ``output/models/`` for files matching a prioritised list of
+    naming conventions.  The walk-forward trainer saves artifacts with
+    model-specific names (e.g. ``regressor_catboost_high.pkl``) that the
+    original single-pattern lookup missed, causing the pipeline to always
+    fall back to the inferior in-process stacking ensemble.
+
+    FIX Change 6: expand search patterns to cover common training-script
+    conventions.  Priority order:
+      1. Exact target name  (``regressor_target_high_pct.pkl``)
+      2. Generic model name (``model_target_high_pct.pkl``)
+      3. Bare target name   (``target_high_pct.pkl``)
+      4. Model-type + label (``regressor_catboost_high.pkl``, etc.)
+    Returns the first successfully-loaded model, or None.
     """
     import joblib
-    for stem in (f"regressor_{target_name}", f"model_{target_name}", target_name):
+
+    # Derive short label: "target_high_pct" → "high", "target_low_pct" → "low"
+    label = None
+    for part in ("high", "low"):
+        if part in target_name:
+            label = part
+            break
+
+    stems = [f"regressor_{target_name}", f"model_{target_name}", target_name]
+    if label:
+        for model_type in ("catboost", "lightgbm", "xgboost",
+                           "huber_xgboost", "huber_lightgbm", "ridge"):
+            stems.append(f"regressor_{model_type}_{label}")
+
+    for stem in stems:
         path = model_dir / f"{stem}.pkl"
         if path.exists():
             try:
@@ -202,7 +223,7 @@ class _StackingEnsemble:
         y_arr = y.values
         self._ridge = Ridge(alpha=1.0)
         self._ridge.fit(X_arr, y_arr)
-        self._huber = HuberRegressor(epsilon=1.35, max_iter=1000)  # FIX F5: 300 too low for 6k rows
+        self._huber = HuberRegressor(epsilon=1.35, max_iter=2000)  # FIX F5/Change5: 300/1000 too low for 6k rows
         self._huber.fit(X_arr, y_arr)
         self._fitted = True
         logger.info("%s: Ridge + HuberRegressor ensemble fitted on %d rows.",
