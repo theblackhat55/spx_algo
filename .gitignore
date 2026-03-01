@@ -55,3 +55,7 @@ logs/
 # ── Compiled distributions ────────────────────────────────────────────────────
 *.zip
 *.tar.gz
+catboost_info/
+output/models/*.pkl
+output/reports/*.csv
+output/reports/*.log

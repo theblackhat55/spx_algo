@@ -222,7 +222,7 @@ class PaperTradeLogger:
                 long_put  = _f("long_put_strike")
                 # FIX Issue 5: hard-coded 20.0 pt fallback understates max loss vs actual
                 # 50.0 pt wings from signal_generator / paper_trade_config.yaml.
-                wing_width = 50.0   # matches wing_width_pts in config/paper_trade_config.yaml
+                wing_width = 10.0   # matches wing_width_pts in config/paper_trade_config.yaml
                 if not np.isnan(long_call) and long_call > call_k:
                     wing_width = min(wing_width, long_call - call_k)
                 if not np.isnan(long_put) and long_put < put_k:

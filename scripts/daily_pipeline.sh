@@ -74,12 +74,9 @@ echo "── Step 2: Feature engineering ─────────────
 python3 -c "
 import pandas as pd
 from pathlib import Path
-from src.features.engineer import build_features
+from src.features.builder import build_feature_matrix
 
-spx = pd.read_parquet('data/raw/spx_daily.parquet')
-feats = build_features(spx)
-Path('data/processed').mkdir(parents=True, exist_ok=True)
-feats.to_parquet('data/processed/features.parquet')
+feats = build_feature_matrix()
 print(f'Features built: {feats.shape[0]} rows × {feats.shape[1]} cols')
 "
 
@@ -91,8 +88,8 @@ import json
 from pathlib import Path
 from src.pipeline.signal_generator import SignalGenerator
 
-gen = SignalGenerator(mode='$EXECUTION_MODE')
-sig = gen.generate(as_of_date='$SIGNAL_DATE')
+gen = SignalGenerator()
+sig = gen.generate(mode='$EXECUTION_MODE', as_of_date='$SIGNAL_DATE')
 if sig is None:
     raise RuntimeError('SignalGenerator returned None')
 

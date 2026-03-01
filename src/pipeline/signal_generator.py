@@ -175,6 +175,9 @@ def _load_model_artifact(model_dir: Path, target_name: str):
             break
 
     stems = [f"regressor_{target_name}", f"model_{target_name}", target_name]
+    # Also search for the walk-forward trainer's canonical naming: regressor_target_<high|low>_pct
+    if label:
+        stems.insert(0, f"regressor_target_{label}_pct")
     if label:
         for model_type in ("catboost", "lightgbm", "xgboost",
                            "huber_xgboost", "huber_lightgbm", "ridge"):
@@ -368,7 +371,7 @@ def assemble_signal(
     signal_date:    str,
     mode:           str,
     metadata:       Dict[str, Any],
-    wing_width_pts: float = 50.0,
+    wing_width_pts: float = 10.0,
     vix_spot:       Optional[float] = None,
 ) -> FullSignal:
     """Compose all components into a FullSignal."""
@@ -499,7 +502,7 @@ class SignalGenerator:
         raw_dir:       Optional[Path] = None,
         processed_dir: Optional[Path] = None,
         output_dir:    Optional[Path] = None,
-        wing_width_pts: float = 50.0,
+        wing_width_pts: float = 10.0,
         seed: int = DEFAULT_SEED,
     ):
         try:
@@ -705,8 +708,7 @@ class SignalGenerator:
 
                 # Record which model path was used
                 model_source = (
-                    "pretrained-artifact"
-                    if hasattr(model, "_fitted") and not isinstance(model, _StackingEnsemble)
+                    type(model).__name__ if not isinstance(model, _StackingEnsemble)
                     else (
                         "stacking-ensemble"
                         if isinstance(model, _StackingEnsemble)

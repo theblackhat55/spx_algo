@@ -122,10 +122,10 @@ def step_features() -> bool:
     logger.info("Step 3 — feature engineering")
     try:
         import pandas as pd
-        from src.features.engineer import build_features
+        from src.features.builder  import build_feature_matrix
 
         spx = pd.read_parquet("data/raw/spx_daily.parquet")
-        feats = build_features(spx)
+        feats = build_feature_matrix()
         Path("data/processed").mkdir(parents=True, exist_ok=True)
         feats.to_parquet("data/processed/features.parquet")
         logger.info("Features: %d rows × %d cols", *feats.shape)
@@ -140,8 +140,8 @@ def step_generate(as_of_date: str, mode: str, signal_dir: Path) -> Optional[obje
     try:
         from src.pipeline.signal_generator import SignalGenerator
 
-        gen = SignalGenerator(mode=mode)
-        sig = gen.generate(as_of_date=as_of_date)
+        gen = SignalGenerator()
+        sig = gen.generate(mode=mode, as_of_date=as_of_date)
         if sig is None:
             logger.error("SignalGenerator returned None")
             return None
@@ -238,7 +238,7 @@ def main() -> None:
         logger.info("Dry-run mode: validating imports only")
         try:
             from src.data.live_fetcher import run_daily_fetch          # noqa: F401
-            from src.features.engineer  import build_features           # noqa: F401
+            from src.features.builder   import build_feature_matrix           # noqa: F401
             from src.pipeline.signal_generator import SignalGenerator   # noqa: F401
             from src.execution.paper_logger    import PaperTradeLogger  # noqa: F401
             logger.info("All imports OK — dry-run complete")
