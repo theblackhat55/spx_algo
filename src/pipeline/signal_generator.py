@@ -36,7 +36,7 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 # Calibration tail: last N rows are used for conformal calibration
-CALIBRATION_TAIL = 126     # ≈6 months
+CALIBRATION_TAIL = 63     # ≈3 months (optimized from 126)
 MIN_TRAIN_ROWS   = 252     # minimum history to attempt model fit
 DEFAULT_SEED     = 42
 
