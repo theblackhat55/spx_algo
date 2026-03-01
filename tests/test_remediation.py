@@ -41,7 +41,7 @@ def _spx_df(n: int = N, seed: int = 42) -> pd.DataFrame:
     h = c + rng.uniform(4, 25, n)
     l = c - rng.uniform(4, 25, n)
     o = c + rng.normal(0, 4, n)
-    v = rng.integers(1_000_000, 5_000_000, n)
+    v = rng.integers(1_000_000, 5_000_000, n).astype(float)  # FIX F3: float avoids int*1.5 dtype error
     return pd.DataFrame({"Open": o, "High": h, "Low": l, "Close": c, "Volume": v},
                         index=dates)
 

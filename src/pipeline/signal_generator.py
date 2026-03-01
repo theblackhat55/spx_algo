@@ -190,6 +190,7 @@ class _StackingEnsemble:
 
     def __init__(self, name: str, seed: int = DEFAULT_SEED):
         self.name   = name
+        self.task   = "regression"   # FIX F4: ConformalPredictor checks model.task
         self._seed  = seed
         self._ridge  = None
         self._huber  = None
@@ -201,7 +202,7 @@ class _StackingEnsemble:
         y_arr = y.values
         self._ridge = Ridge(alpha=1.0)
         self._ridge.fit(X_arr, y_arr)
-        self._huber = HuberRegressor(epsilon=1.35, max_iter=300)
+        self._huber = HuberRegressor(epsilon=1.35, max_iter=1000)  # FIX F5: 300 too low for 6k rows
         self._huber.fit(X_arr, y_arr)
         self._fitted = True
         logger.info("%s: Ridge + HuberRegressor ensemble fitted on %d rows.",

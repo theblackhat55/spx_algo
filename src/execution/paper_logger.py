@@ -224,21 +224,23 @@ class PaperTradeLogger:
                 max_loss        = -(2 * wing_width - credit_pts) * 100
                 condor_pnl      = max(condor_pnl, max_loss)
 
-        # Coverage flags
+        # Coverage flags — return strings to match str-dtype CSV DataFrame (FIX F1)
         def _cov(lo_col, hi_col, val):
             lo, hi = _f(lo_col), _f(hi_col)
             if np.isnan(lo) or np.isnan(hi):
-                return np.nan
-            return int(lo <= val <= hi)
+                return ""
+            return str(int(lo <= val <= hi))
 
-        df.at[idx, "actual_high"]             = actual_high
-        df.at[idx, "actual_low"]              = actual_low
-        df.at[idx, "actual_close"]            = actual_close
-        df.at[idx, "high_error_pct"]          = round(high_err,  6) if not np.isnan(high_err)  else ""
-        df.at[idx, "low_error_pct"]           = round(low_err,   6) if not np.isnan(low_err)   else ""
-        df.at[idx, "direction_correct"]       = dir_correct if not isinstance(dir_correct, float) else ""
-        df.at[idx, "condor_result"]           = condor_result
-        df.at[idx, "condor_pnl"]              = round(condor_pnl, 2)
+        # FIX F1: all df.at assignments must be str — _read_df() uses dtype=str
+        # and pandas 2.2 + pyarrow rejects non-str values in str-typed columns.
+        df.at[idx, "actual_high"]              = str(actual_high)
+        df.at[idx, "actual_low"]               = str(actual_low)
+        df.at[idx, "actual_close"]             = str(actual_close)
+        df.at[idx, "high_error_pct"]           = str(round(high_err,  6)) if not np.isnan(high_err)  else ""
+        df.at[idx, "low_error_pct"]            = str(round(low_err,   6)) if not np.isnan(low_err)   else ""
+        df.at[idx, "direction_correct"]        = str(dir_correct) if not isinstance(dir_correct, float) else ""
+        df.at[idx, "condor_result"]            = str(condor_result)
+        df.at[idx, "condor_pnl"]               = str(round(condor_pnl, 2))
         df.at[idx, "interval_68_covered_high"] = _cov("lower_68_high", "upper_68_high", actual_high)
         df.at[idx, "interval_68_covered_low"]  = _cov("lower_68_low",  "upper_68_low",  actual_low)
         df.at[idx, "interval_90_covered_high"] = _cov("lower_90_high", "upper_90_high", actual_high)
@@ -369,7 +371,7 @@ class PaperTradeLogger:
             idx = df.index[df["date"] == date_str][0]
             for col in LOG_COLUMNS:
                 if row.get(col, "") != "":
-                    df.at[idx, col] = row[col]
+                    df.at[idx, col] = str(row[col])   # FIX F2: cast to str for pyarrow/pandas 2.2
         else:
             new_row = pd.DataFrame([{col: row.get(col, "") for col in LOG_COLUMNS}])
             df = pd.concat([df, new_row], ignore_index=True)
