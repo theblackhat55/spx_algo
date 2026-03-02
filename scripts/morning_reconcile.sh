@@ -9,7 +9,7 @@ exec > >(tee -a "$LOG") 2>&1
 
 echo "===== $(date) ===== RECONCILIATION START ====="
 
-python3.11 -c "
+python3 -c "
 import sys; sys.path.insert(0, '.')
 from src.pipeline.reconciler import Reconciler
 
@@ -18,4 +18,9 @@ result = recon.run()
 print(f'Reconciliation: {result}')
 "
 
+echo ""
+echo "===== ERROR CORRECTION UPDATE ====="
+python3 scripts/update_error_correction.py
+
+echo ""
 echo "===== $(date) ===== RECONCILIATION COMPLETE ====="
