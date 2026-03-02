@@ -302,22 +302,53 @@ def _calibrate_conformal(
     target: pd.Series,
     cal_tail: int = CALIBRATION_TAIL,
     seed: int = DEFAULT_SEED,
-) -> "ConformalPredictor":
-    from src.calibration.conformal import ConformalPredictor
+    regime_series: Optional[pd.Series] = None,
+):
+    """Calibrate conformal predictor — adaptive (regime-aware) with fallback."""
+    try:
+        from src.calibration.adaptive_conformal import AdaptiveConformalPredictor
 
-    valid_idx = target.dropna().index
-    X_all = features.loc[valid_idx].fillna(0)
-    y_all = target.loc[valid_idx]
+        valid_idx = target.dropna().index
+        X_all = features.loc[valid_idx].fillna(0)
+        y_all = target.loc[valid_idx]
 
-    if len(y_all) < cal_tail + 10:
-        cal_tail = max(10, len(y_all) // 4)
+        if len(y_all) < cal_tail + 10:
+            cal_tail = max(10, len(y_all) // 4)
 
-    X_cal = X_all.iloc[-cal_tail:]
-    y_cal = y_all.iloc[-cal_tail:]
+        X_cal = X_all.iloc[-cal_tail:]
+        y_cal = y_all.iloc[-cal_tail:]
 
-    cp = ConformalPredictor(model, use_mapie=False, alpha_list=[0.68, 0.90])
-    cp.calibrate(X_cal, y_cal)
-    return cp
+        # Align regime series if provided
+        regimes = None
+        if regime_series is not None:
+            common = X_cal.index.intersection(regime_series.index)
+            if len(common) > 10:
+                regimes = regime_series.loc[common]
+                X_cal = X_cal.loc[common]
+                y_cal = y_all.loc[common]
+
+        acp = AdaptiveConformalPredictor(model, alpha_list=[0.68, 0.90], half_life=15)
+        acp.calibrate(X_cal, y_cal, regimes)
+        acp.save_health()
+        return acp
+
+    except Exception as exc:
+        logger.warning("Adaptive conformal failed (%s), falling back to standard", exc)
+        from src.calibration.conformal import ConformalPredictor
+
+        valid_idx = target.dropna().index
+        X_all = features.loc[valid_idx].fillna(0)
+        y_all = target.loc[valid_idx]
+
+        if len(y_all) < cal_tail + 10:
+            cal_tail = max(10, len(y_all) // 4)
+
+        X_cal = X_all.iloc[-cal_tail:]
+        y_cal = y_all.iloc[-cal_tail:]
+
+        cp = ConformalPredictor(model, use_mapie=False, alpha_list=[0.68, 0.90])
+        cp.calibrate(X_cal, y_cal)
+        return cp
 
 
 # ---------------------------------------------------------------------------
