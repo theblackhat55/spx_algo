@@ -6,10 +6,13 @@ Usage: python3 scripts/backtest_date.py 2026-02-01
 import sys
 import os
 import warnings
+from pathlib import Path
 warnings.filterwarnings('ignore')
 
-sys.path.insert(0, '/root/spx_algo')
-os.chdir('/root/spx_algo')
+# Use project root relative to this script's location (portable across installs)
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+sys.path.insert(0, _REPO_ROOT)
+os.chdir(_REPO_ROOT)
 
 import pandas as pd
 import numpy as np

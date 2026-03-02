@@ -29,7 +29,7 @@ if trades_path.exists():
                 f"  Avg PnL: ${avg_pnl:,.2f}/trade"
             )
 
-dp = sig.get("direction_probability", 0)
+dp = sig.get("direction_prob", 0)  # FullSignal field is direction_prob, not direction_probability
 report = (
     f"SPX Iron-Condor Signal\n"
     f"━━━━━━━━━━━━━━━━━━━━━━\n"
