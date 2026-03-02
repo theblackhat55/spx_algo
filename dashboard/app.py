@@ -97,6 +97,61 @@ def load_backtest_results():
     return pd.DataFrame()
 
 
+
+
+@st.cache_data(ttl=300)
+def load_error_history():
+    path = ROOT / "output" / "monitoring" / "error_history.csv"
+    if path.exists():
+        df = pd.read_csv(path, parse_dates=["date"], index_col="date")
+        return df.sort_index()
+    return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)
+def load_calibration_health():
+    path = ROOT / "output" / "monitoring" / "calibration_health.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+
+@st.cache_data(ttl=300)
+def load_correction_log():
+    path = ROOT / "output" / "monitoring" / "correction_log.csv"
+    if path.exists():
+        return pd.read_csv(path)
+    return pd.DataFrame()
+
+
+@st.cache_data(ttl=300)
+def load_market_intel():
+    path = ROOT / "data" / "processed" / "market_intel.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+
+@st.cache_data(ttl=300)
+def load_retrain_report():
+    path = ROOT / "output" / "reports" / "weekly_retrain_latest.json"
+    if path.exists():
+        with open(path) as f:
+            return json.load(f)
+    return None
+
+
+@st.cache_data(ttl=60)
+def load_cron_status():
+    path = Path("/home/openclaw/.openclaw/cron/jobs.json")
+    if path.exists():
+        with open(path) as f:
+            data = json.load(f)
+        return data.get("jobs", [])
+    return []
+
 def load_signal_for_date(date_str):
     """Load signal JSON for a specific date."""
     path = SIGNALS_DIR / f"signal_{date_str}.json"
@@ -110,7 +165,8 @@ def load_signal_for_date(date_str):
 st.sidebar.title("📊 SPX Algo Dashboard")
 page = st.sidebar.radio(
     "Navigate",
-    ["🏠 Overview", "📈 Backtest", "🎯 Replay (Jan-Feb 2026)", "📋 Paper Trade Log", "🔮 Latest Signal"],
+    ["🏠 Overview", "📈 Backtest", "🎯 Replay (Jan-Feb 2026)", "📋 Paper Trade Log", "🔮 Latest Signal",
+     "🧠 Model Health", "⚡ Risk & Intel", "📅 Cron Jobs"],
 )
 
 
@@ -624,7 +680,248 @@ elif page == "🔮 Latest Signal":
         st.warning("No signal file found.")
 
 
+
+# ══════════════════════════════════════════════════════════════════════
+elif page == "🧠 Model Health":
+    st.title("Model Health & Learning")
+
+    tab1, tab2, tab3 = st.tabs(["Error Correction", "Conformal Calibration", "Weekly Retrain"])
+
+    with tab1:
+        st.subheader("Level 3: Error Correction Layer")
+        error_df = load_error_history()
+
+        if error_df.empty:
+            st.info("Error correction activates after 20 trading days of data. Morning reconciliation records prediction errors daily.")
+            st.metric("Days collected", 0)
+            st.metric("Days needed", 20)
+        else:
+            st.metric("Days of error data", len(error_df))
+            active = len(error_df) >= 20
+            st.metric("Status", "🟢 Active" if active else f"🟡 Collecting ({len(error_df)}/20 days)")
+
+            # Error trend chart
+            st.markdown("---")
+            st.subheader("Prediction Error Trend")
+
+            fig = make_subplots(rows=2, cols=1, shared_xaxes=True,
+                                subplot_titles=("High Prediction Error", "Low Prediction Error"))
+
+            fig.add_trace(go.Scatter(x=error_df.index, y=error_df["error_high"],
+                                     mode="lines+markers", name="High Error (signed)",
+                                     line=dict(color="#2196F3")), row=1, col=1)
+            fig.add_trace(go.Scatter(x=error_df.index, y=error_df["error_low"],
+                                     mode="lines+markers", name="Low Error (signed)",
+                                     line=dict(color="#FF9800")), row=2, col=1)
+
+            # Add zero line
+            fig.add_hline(y=0, line_color="gray", line_dash="dash", row=1, col=1)
+            fig.add_hline(y=0, line_color="gray", line_dash="dash", row=2, col=1)
+
+            fig.update_layout(height=500, showlegend=True)
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Rolling bias
+            if len(error_df) >= 5:
+                st.markdown("---")
+                st.subheader("Rolling Bias (5-day)")
+                c1, c2, c3, c4 = st.columns(4)
+                recent = error_df.tail(5)
+                c1.metric("High Bias", f"{recent['error_high'].mean():+.4f}%",
+                          "Over-predicting" if recent["error_high"].mean() > 0 else "Under-predicting")
+                c2.metric("Low Bias", f"{recent['error_low'].mean():+.4f}%",
+                          "Over-predicting" if recent["error_low"].mean() > 0 else "Under-predicting")
+                c3.metric("High MAE", f"{recent['abs_error_high'].mean():.4f}%")
+                c4.metric("Low MAE", f"{recent['abs_error_low'].mean():.4f}%")
+
+            # Correction log
+            corr_log = load_correction_log()
+            if not corr_log.empty:
+                st.markdown("---")
+                st.subheader("Recent Corrections Applied")
+                st.dataframe(corr_log.tail(10), use_container_width=True)
+
+            # Error by regime
+            if "regime" in error_df.columns:
+                st.markdown("---")
+                st.subheader("Error by Regime")
+                regime_stats = error_df.groupby("regime").agg({
+                    "abs_error_high": "mean",
+                    "abs_error_low": "mean",
+                    "error_high": ["mean", "count"],
+                }).round(5)
+                st.dataframe(regime_stats, use_container_width=True)
+
+    with tab2:
+        st.subheader("Level 2: Adaptive Conformal Calibration")
+        cal_health = load_calibration_health()
+
+        if cal_health is None:
+            st.info("Calibration diagnostics will appear after the next signal generation.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Calibration Date", cal_health.get("date", "N/A"))
+            c2.metric("Samples", cal_health.get("n_samples", 0))
+            c3.metric("Half-life", f"{cal_health.get('half_life', 15)} days")
+
+            st.metric("Auto-widen Active", "🔴 YES" if cal_health.get("widen_active") else "🟢 No")
+
+            st.markdown("---")
+            st.subheader("Quantile Widths by Regime")
+
+            regime_data = []
+            for regime in ["GREEN", "YELLOW", "RED"]:
+                row = {"Regime": regime}
+                for q in [68, 90]:
+                    key = f"q{q}_{regime}"
+                    val = cal_health.get(key, None)
+                    row[f"{q}% Width"] = f"{val*100:.3f}%" if val else "N/A"
+                regime_data.append(row)
+
+            # Add "ALL" row
+            all_row = {"Regime": "ALL"}
+            for q in [68, 90]:
+                val = cal_health.get(f"q{q}_all", None)
+                all_row[f"{q}% Width"] = f"{val*100:.3f}%" if val else "N/A"
+            regime_data.append(all_row)
+
+            st.table(pd.DataFrame(regime_data))
+
+            st.caption("Wider intervals = more conservative strikes. RED regime should have widest intervals.")
+
+    with tab3:
+        st.subheader("Level 1: Weekly Model Retrain")
+        retrain = load_retrain_report()
+
+        if retrain is None:
+            st.info("No retrain report found. Weekly retrain runs Sundays at 10:00 UTC.")
+        else:
+            st.metric("Last Retrain", retrain.get("timestamp", "N/A")[:10])
+            st.metric("Status", retrain.get("status", "N/A"))
+            st.metric("Decision", retrain.get("decision", "N/A"))
+
+            if "old_metrics" in retrain:
+                st.markdown("---")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.markdown("**Current Model**")
+                    old = retrain["old_metrics"]
+                    st.write(f"Win Rate: {old.get('win_rate', 0):.1f}%")
+                    st.write(f"Total P&L: ${old.get('total_pnl', 0):,.2f}")
+                    st.write(f"Sharpe: {old.get('sharpe', 0):.2f}")
+                    st.write(f"Max DD: ${old.get('max_drawdown', 0):,.2f}")
+
+                with col2:
+                    if "new_metrics" in retrain:
+                        st.markdown("**Retrained Model**")
+                        new = retrain["new_metrics"]
+                        st.write(f"Win Rate: {new.get('win_rate', 0):.1f}%")
+                        st.write(f"Total P&L: ${new.get('total_pnl', 0):,.2f}")
+                        st.write(f"Sharpe: {new.get('sharpe', 0):.2f}")
+                        st.write(f"Max DD: ${new.get('max_drawdown', 0):,.2f}")
+
+
+# ══════════════════════════════════════════════════════════════════════
+elif page == "⚡ Risk & Intel":
+    st.title("Market Risk & Intelligence")
+
+    intel = load_market_intel()
+
+    if intel is None:
+        st.info("Market intel updates at 19:30 UTC (pre-market intel cron).")
+    else:
+        # Risk score banner
+        risk = intel.get("risk_score", 0)
+        risk_colors = {1: "🟢", 2: "🟡", 3: "🟠", 4: "🔴", 5: "⛔"}
+        risk_labels = {1: "LOW", 2: "MODERATE", 3: "ELEVATED", 4: "HIGH", 5: "EXTREME"}
+
+        st.markdown(f"## {risk_colors.get(risk, '❓')} Risk Score: {risk}/5 — {risk_labels.get(risk, 'UNKNOWN')}")
+
+        tail = intel.get("tail_risk_flag", False)
+        if tail:
+            st.error("⚠️ TAIL RISK FLAG ACTIVE — DO NOT TRADE")
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Risk Score", f"{risk}/5")
+        c2.metric("Tail Risk", "🔴 YES" if tail else "🟢 No")
+        c3.metric("Regime", intel.get("regime", "N/A"))
+        c4.metric("Date", intel.get("date", "N/A"))
+
+        st.markdown("---")
+        st.subheader("Key Events")
+        events = intel.get("key_events", [])
+        if events:
+            for ev in events:
+                if isinstance(ev, dict):
+                    st.write(f"• **{ev.get('event', '')}** — {ev.get('impact', '')}")
+                else:
+                    st.write(f"• {ev}")
+        else:
+            st.write("No key events flagged.")
+
+        st.markdown("---")
+        st.subheader("Sentiment")
+        st.write(intel.get("sentiment_summary", "N/A"))
+
+        if intel.get("reasoning"):
+            with st.expander("Risk Assessment Reasoning"):
+                st.write(intel["reasoning"])
+
+        with st.expander("Raw Intel JSON"):
+            st.json(intel)
+
+
+# ══════════════════════════════════════════════════════════════════════
+elif page == "📅 Cron Jobs":
+    st.title("Scheduled Jobs")
+
+    jobs = load_cron_status()
+
+    if not jobs:
+        st.warning("Could not load cron jobs. Check OpenClaw configuration.")
+    else:
+        for job in jobs:
+            name = job.get("name", "Unknown")
+            schedule = job.get("schedule", {})
+            expr = schedule.get("expr", "N/A") if isinstance(schedule, dict) else str(schedule)
+            tz = schedule.get("tz", "UTC") if isinstance(schedule, dict) else "UTC"
+            state = job.get("state", {})
+            status = state.get("lastRunStatus", "never run")
+            errors = state.get("consecutiveErrors", 0)
+            enabled = job.get("enabled", True)
+
+            status_icon = "🟢" if status == "ok" else "🔴" if status == "error" else "⚪"
+            enabled_icon = "" if enabled else "⏸️ "
+
+            with st.expander(f"{status_icon} {enabled_icon}{name} — `{expr}` {tz}"):
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Status", status or "never run")
+                c2.metric("Errors", errors)
+                c3.metric("Delivered", "✅" if state.get("lastDelivered") else "—")
+
+                last_run = state.get("lastRunAtMs")
+                if last_run:
+                    from datetime import datetime, timezone
+                    last_dt = datetime.fromtimestamp(last_run / 1000, tz=timezone.utc)
+                    c4.metric("Last Run", last_dt.strftime("%Y-%m-%d %H:%M UTC"))
+
+                duration = state.get("lastDurationMs")
+                if duration:
+                    st.write(f"Duration: {duration/1000:.1f}s")
+
+                st.write(f"Schedule: `{expr}` ({tz})")
+                st.write(f"Target: {job.get('sessionTarget', 'N/A')}")
+
+                delivery = job.get("delivery", {})
+                if delivery:
+                    st.write(f"Delivery: {delivery.get('channel', 'N/A')} → {delivery.get('to', 'N/A')}")
+
+    st.markdown("---")
+    st.caption("Jobs are managed by OpenClaw. Edit via `~/.openclaw/cron/jobs.json`.")
+
+
 # Footer
 st.sidebar.markdown("---")
-st.sidebar.caption("SPX Algo Dashboard v1.0")
+st.sidebar.caption("SPX Algo Dashboard v2.0")
+st.sidebar.caption("Levels: Retrain ✅ | Adaptive Conformal ✅ | Error Correction ✅")
 st.sidebar.caption(f"Data through: {load_spx().index[-1].strftime('%Y-%m-%d')}")
