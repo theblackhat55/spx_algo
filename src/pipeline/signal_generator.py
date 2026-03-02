@@ -222,8 +222,8 @@ class _StackingEnsemble:
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> "_StackingEnsemble":
         from sklearn.linear_model  import Ridge, HuberRegressor
-        X_arr = X.values
-        y_arr = y.values
+        X_arr = X.values if hasattr(X, "values") else X
+        y_arr = y.values if hasattr(y, "values") else y
         self._ridge = Ridge(alpha=1.0)
         self._ridge.fit(X_arr, y_arr)
         self._huber = HuberRegressor(epsilon=1.35, max_iter=2000)  # FIX F5/Change5: 300/1000 too low for 6k rows
@@ -236,7 +236,7 @@ class _StackingEnsemble:
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         if not self._fitted:
             raise RuntimeError(f"{self.name} not fitted")
-        X_arr = X.values
+        X_arr = X.values if hasattr(X, "values") else X
         ridge_pred = self._ridge.predict(X_arr)
         huber_pred = self._huber.predict(X_arr)
         return (ridge_pred + huber_pred) / 2.0
