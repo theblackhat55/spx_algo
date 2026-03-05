@@ -143,3 +143,10 @@ YELLOW_INTERVAL_MULTIPLIER: float = 1.5
 # API KEYS  (loaded from .env — never hardcoded here)
 # ─────────────────────────────────────────────────────────────────────────────
 FRED_API_KEY: str | None = os.getenv("FRED_API_KEY")
+
+# ── IBKR Settings ─────────────────────────────────────────────────────────────
+IBKR_HOST      = os.getenv("IBKR_HOST", "127.0.0.1")
+IBKR_PORT      = int(os.getenv("IBKR_PORT", "4002"))
+IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "10"))
+IBKR_ENABLED   = os.getenv("IBKR_ENABLED", "true").lower() == "true"
+IBKR_TIMEOUT   = int(os.getenv("IBKR_TIMEOUT", "10"))

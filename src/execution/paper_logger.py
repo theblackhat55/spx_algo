@@ -26,7 +26,8 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-PAPER_LOG_PATH = Path("output/trades/paper_trade_log.csv")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+PAPER_LOG_PATH = PROJECT_ROOT / "output/trades/paper_trade_log.csv"
 
 # All columns in the CSV, in order
 LOG_COLUMNS = [

@@ -665,6 +665,32 @@ elif page == "🔮 Latest Signal":
                           margin=dict(l=50, r=200, t=30, b=30))
         st.plotly_chart(fig, use_container_width=True)
 
+        # ── IBKR Live Features ───────────────────────────────────────────
+        ibkr = sig.get("ibkr_features", {})
+        if ibkr and any(v is not None for v in ibkr.values()):
+            st.markdown("---")
+            st.subheader("📡 IBKR Live Data")
+            quality = ibkr.get("ibkr_data_quality", "UNKNOWN")
+            quality_color = {"FULL": "🟢", "PARTIAL": "🟡", "NO_CHAIN": "🟠", "NONE": "🔴"}.get(quality, "⚪")
+            st.caption(f"Data quality: {quality_color} {quality}")
+
+            i1, i2, i3, i4 = st.columns(4)
+            i1.metric("Live SPX", f"{ibkr.get('ibkr_spx_price') or 0:,.2f}" if ibkr.get("ibkr_spx_price") else "N/A")
+            i2.metric("Live VIX", f"{ibkr.get('ibkr_vix') or 0:.2f}" if ibkr.get("ibkr_vix") else "N/A")
+            i3.metric("ATM IV", f"{ibkr.get('ibkr_atm_iv') or 0:.1%}" if ibkr.get("ibkr_atm_iv") else "N/A")
+            i4.metric("IV Skew (25d)", f"{ibkr.get('ibkr_iv_skew_25d') or 0:.3f}" if ibkr.get("ibkr_iv_skew_25d") else "N/A",
+                      help="Put IV minus Call IV at 25-delta. Positive = puts expensive")
+
+            i5, i6, i7, i8 = st.columns(4)
+            i5.metric("Put/Call Ratio", f"{ibkr.get('ibkr_put_call_ratio') or 0:.2f}" if ibkr.get("ibkr_put_call_ratio") else "N/A",
+                      help=">1 = more puts than calls (bearish flow)")
+            i6.metric("GEX", f"{ibkr.get('ibkr_gex') or 0:,.0f}" if ibkr.get("ibkr_gex") else "N/A",
+                      help="Gamma exposure. Positive = dealers long gamma (dampens moves)")
+            i7.metric("Call Wall", f"{ibkr.get('ibkr_call_wall') or 0:,.0f}" if ibkr.get("ibkr_call_wall") else "N/A",
+                      help="Strike with highest call open interest — resistance level")
+            i8.metric("Put Wall", f"{ibkr.get('ibkr_put_wall') or 0:,.0f}" if ibkr.get("ibkr_put_wall") else "N/A",
+                      help="Strike with highest put open interest — support level")
+
         with st.expander("Signal metadata"):
             st.write(f"Generated at: {sig.get('generated_at', 'N/A')}")
             st.write(f"Model versions: {sig.get('model_versions', {})}")

@@ -31,9 +31,11 @@ from src.pipeline.alerting         import Alerter, AlertConfig
 
 logger = logging.getLogger(__name__)
 
-SIGNAL_DIR  = Path("output/signals")
-OUTPUT_DIR  = Path("output")
-REPORT_DIR  = Path("output/reports")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+SIGNAL_DIR  = PROJECT_ROOT / "output/signals"
+OUTPUT_DIR  = PROJECT_ROOT / "output"
+REPORT_DIR  = PROJECT_ROOT / "output/reports"
+PARQUET_FALLBACK = PROJECT_ROOT / "data/raw/spx_daily.parquet"
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +75,7 @@ def _fetch_actual(trade_date: str) -> Optional[Dict[str, float]]:
         logger.debug("yfinance fetch failed: %s", exc)
 
     # Parquet fallback
-    parquet = Path("data/raw/spx_daily.parquet")
+    parquet = PARQUET_FALLBACK
     if parquet.exists():
         try:
             df = pd.read_parquet(parquet)
@@ -307,6 +309,21 @@ class Reconciler:
 
         logger.info("Reconciliation complete for %s — drift=%s", trade_date, drift_status.value)
         return result
+
+    def reconcile_latest(self, max_lookback: int = 5) -> Dict[str, Any]:
+        """Reconcile the most recent trading day (looking back up to 5 days)."""
+        today = date.today()
+        last_result: Dict[str, Any] | None = None
+        for days in range(1, max_lookback + 1):
+            candidate = today - timedelta(days=days)
+            if candidate.weekday() >= 5:
+                continue
+            trade_date = candidate.strftime('%Y-%m-%d')
+            result = self.reconcile(trade_date)
+            last_result = result
+            if result.get('status') not in {'missing_signal', 'missing_actuals'}:
+                return result
+        return last_result or {'status': 'skipped', 'errors': ['No recent trading day found']}
 
     # ------------------------------------------------------------------
 

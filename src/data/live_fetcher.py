@@ -442,4 +442,47 @@ def run_daily_fetch(
         target_date, status["data_quality"],
         len(status["tickers_ok"]), n_fail, len(status["appended"]),
     )
+
+    # Step 5: Fetch IBKR live features (optional — skip gracefully if unavailable)
+    status["ibkr_features"] = None
+    try:
+        from config.settings import IBKR_ENABLED, IBKR_HOST, IBKR_PORT
+        ibkr_enabled = IBKR_ENABLED
+    except Exception:
+        ibkr_enabled = True   # default: attempt if setting is missing
+        IBKR_HOST = "127.0.0.1"
+        IBKR_PORT = 4002
+
+    if ibkr_enabled:
+        try:
+            # Quick reachability probe before committing to a full fetch
+            import socket
+            _sock = socket.create_connection((IBKR_HOST, IBKR_PORT), timeout=3)
+            _sock.close()
+            gateway_reachable = True
+        except Exception:
+            gateway_reachable = False
+            logger.info("run_daily_fetch: IB Gateway not reachable — skipping IBKR features.")
+
+        if gateway_reachable:
+            try:
+                from src.data.ibkr_live_features import get_ibkr_features
+                # Pass the SPX price we already have (if any) to save one IB request
+                spx_series = status.get("tickers_ok") and fetch_results.get("spx_daily.parquet")
+                spx_hint: Optional[float] = None
+                if spx_series is not None:
+                    try:
+                        spx_hint = float(spx_series.get("Close", spx_series.iloc[-1]))
+                    except Exception:
+                        pass
+                ibkr_feats = get_ibkr_features(spx_price=spx_hint)
+                status["ibkr_features"] = ibkr_feats
+                logger.info(
+                    "run_daily_fetch: IBKR features fetched (quality=%s)",
+                    ibkr_feats.get("ibkr_data_quality"),
+                )
+            except Exception as exc:
+                logger.warning("run_daily_fetch: IBKR feature fetch failed: %s", exc)
+                status["ibkr_features"] = {"ibkr_data_quality": "ERROR"}
+
     return status

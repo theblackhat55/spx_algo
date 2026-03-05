@@ -46,6 +46,9 @@ from pathlib import Path
 from typing import Optional
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
+_DATA_RAW_DIR = _REPO_ROOT / "data" / "raw"
+_DATA_PROCESSED_DIR = _REPO_ROOT / "data" / "processed"
+_DEFAULT_SIGNAL_DIR = _REPO_ROOT / "output" / "signals"
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
@@ -124,10 +127,11 @@ def step_features() -> bool:
         import pandas as pd
         from src.features.builder  import build_feature_matrix
 
-        spx = pd.read_parquet("data/raw/spx_daily.parquet")
+        spx_path = _DATA_RAW_DIR / "spx_daily.parquet"
+        spx = pd.read_parquet(spx_path)
         feats = build_feature_matrix()
-        Path("data/processed").mkdir(parents=True, exist_ok=True)
-        feats.to_parquet("data/processed/features.parquet")
+        _DATA_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+        feats.to_parquet(_DATA_PROCESSED_DIR / "features.parquet")
         logger.info("Features: %d rows × %d cols", *feats.shape)
         return True
     except Exception as exc:
@@ -150,7 +154,7 @@ def step_generate(as_of_date: str, mode: str, signal_dir: Path) -> Optional[obje
         out_path = signal_dir / f"signal_{as_of_date}.json"
         out_path.write_text(sig.to_json(), encoding="utf-8")
         latest = signal_dir / "latest_signal.json"
-        if latest.is_symlink():
+        if latest.exists():
             latest.unlink()
         latest.symlink_to(out_path.name)
         logger.info("Signal → %s  tradeable=%s  regime=%s",
@@ -181,7 +185,8 @@ def step_log_outcome(as_of_date: str) -> None:
         import pandas as pd
         from src.execution.paper_logger import PaperTradeLogger
 
-        spx = pd.read_parquet("data/raw/spx_daily.parquet")
+        spx_path = _DATA_RAW_DIR / "spx_daily.parquet"
+        spx = pd.read_parquet(spx_path)
         spx.index = pd.to_datetime(spx.index)
         # Find the row for the signal_date stored in the paper-trade log
         pl = PaperTradeLogger()
@@ -222,7 +227,7 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--mode",  choices=["paper", "live"], default="paper")
     p.add_argument("--date",  default=None,
                    help="Override signal date (YYYY-MM-DD); defaults to today")
-    p.add_argument("--signal-dir", type=Path, default=Path("output/signals"))
+    p.add_argument("--signal-dir", type=Path, default=_DEFAULT_SIGNAL_DIR)
     p.add_argument("--dry-run", action="store_true",
                    help="Validate configuration only, no pipeline execution")
     return p.parse_args()
@@ -231,6 +236,10 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args  = _parse_args()
     today = args.date or date.today().strftime("%Y-%m-%d")
+
+    signal_dir = Path(args.signal_dir)
+    if not signal_dir.is_absolute():
+        signal_dir = (_REPO_ROOT / signal_dir).resolve()
 
     logger.info("SPX Algo Daily Orchestrator — date=%s  mode=%s", today, args.mode)
 
@@ -262,7 +271,7 @@ def main() -> None:
         errors.append("feature-engineering failed")
 
     # ── Step 4: Signal ────────────────────────────────────────────────────────
-    signal = step_generate(today, args.mode, args.signal_dir)
+    signal = step_generate(today, args.mode, signal_dir)
     if signal is None:
         errors.append("signal-generation failed")
 
