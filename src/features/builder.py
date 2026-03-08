@@ -34,6 +34,7 @@ from src.features.technical        import compute_all_technical_features
 from src.features.calendar_features import compute_calendar_features
 from src.features.options_features  import compute_all_options_features
 from src.features.lagged_targets    import compute_lagged_target_features
+from src.features.events            import compute_event_features
 from src.data.calendar              import build_trading_calendar
 
 logger = logging.getLogger(__name__)
@@ -126,9 +127,13 @@ def build_feature_matrix(
     logger.info("Computing lagged-target features …")
     lagged = compute_lagged_target_features(spx)
 
+    logger.info("Computing explicit event features …")
+    event_path = raw_dir.parent / "reference" / "event_calendar.csv"
+    events = compute_event_features(spx.index, event_path)
+
     # ── Inner join on date index ──────────────────────────────────────────────
     logger.info("Merging feature groups …")
-    frames = [prox, vol, tech, cal_feat, lagged]
+    frames = [prox, vol, tech, cal_feat, lagged, events]
     if not opts.empty:
         frames.append(opts)
 

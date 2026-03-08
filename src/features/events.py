@@ -109,15 +109,16 @@ def compute_event_features(
 
     # month-end: next trading day is in a different month
     next_trade = idx_series.shift(-1)
+    valid_next = next_trade.notna()
     out["is_month_end"] = (
-        (next_trade.dt.month != idx_series.dt.month)
+        ((next_trade.dt.month != idx_series.dt.month) & valid_next)
         .fillna(False)
         .astype(int)
     )
 
     # quarter-end: next trading day is in a different quarter
     out["is_quarter_end"] = (
-        (next_trade.dt.quarter != idx_series.dt.quarter)
+        ((next_trade.dt.quarter != idx_series.dt.quarter) & valid_next)
         .fillna(False)
         .astype(int)
     )
