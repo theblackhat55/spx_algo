@@ -1,0 +1,34 @@
+{
+  "project": "spx_algo",
+  "primary_objective": "Reusable next-day SPX OHLC hybrid forecast engine",
+  "status": {
+    "core_deployment_complete": true,
+    "daily_hybrid_forecast_operational": true,
+    "reconciliation_framework_ready": true,
+    "scorecard_framework_ready": true,
+    "historical_overnight_es_integration_complete": false,
+    "adaptive_source_selection_complete": false,
+    "quantile_intervals_complete": false
+  },
+  "current_best_architecture": {
+    "target_gap_ret": "rolling_baseline",
+    "target_high_from_open": "model",
+    "target_low_from_open": "model",
+    "target_close_from_open": "model"
+  },
+  "important_findings": [
+    "Pure ML OHLC forecasting underperformed naive and rolling baselines overall.",
+    "Hybrid forecast architecture improved absolute OHLC accuracy.",
+    "Gap and open remain weakest modeled components; rolling baseline currently best.",
+    "ES daily features improved directional context more than point accuracy.",
+    "Yahoo recent intraday ES data is insufficient for robust historical overnight modeling."
+  ],
+  "pending_next_steps": [
+    "Accumulate 5 to 20 live reconciled forecast rows.",
+    "Assess forecast_history.csv and forecast_scorecard.json.",
+    "Consider adaptive component source selection.",
+    "Clean overnight feature handling in main feature builder.",
+    "Make next-trading-day logic holiday-aware."
+  ],
+  "resume_instruction": "Read docs/PROJECT_HANDOFF.md and docs/project_state.json first before continuing development."
+}

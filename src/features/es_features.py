@@ -30,7 +30,7 @@ def compute_es_features(es_df: pd.DataFrame, spx_df: pd.DataFrame | None = None)
     feat = pd.DataFrame(index=es.index)
 
     # Basic ES daily structure
-    feat["es_ret_1d"] = es["Close"].pct_change(1)
+    feat["es_ret_1d"] = es["Close"].pct_change(1, fill_method=None)
     feat["es_ret_3d"] = es["Close"].pct_change(3)
     feat["es_ret_5d"] = es["Close"].pct_change(5)
 
@@ -64,7 +64,7 @@ def compute_es_features(es_df: pd.DataFrame, spx_df: pd.DataFrame | None = None)
         if spx_close_col is not None:
             spx_close = spx[[spx_close_col]].rename(columns={spx_close_col: "spx_close"})
             base = base.join(spx_close, how="left")
-            feat["es_minus_spx_ret_1d"] = feat["es_ret_1d"] - base["spx_close"].pct_change(1)
+            feat["es_minus_spx_ret_1d"] = feat["es_ret_1d"] - base["spx_close"].pct_change(1, fill_method=None)
             feat["es_spx_ratio_vs_ma20"] = (
                 (base["es_close"] / base["spx_close"]) /
                 (base["es_close"] / base["spx_close"]).rolling(20).mean()

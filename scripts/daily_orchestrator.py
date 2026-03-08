@@ -1,18 +1,3 @@
-
-def _run_hybrid_forecast_step_nonfatal() -> None:
-    """Run hybrid OHLC forecast generation without breaking legacy orchestration."""
-    cmd = ["python", "scripts/run_hybrid_forecast_step.py"]
-    try:
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
-        if result.stdout:
-            print(result.stdout)
-        if result.returncode != 0:
-            print("[WARN] Hybrid OHLC forecast step failed; continuing legacy flow.")
-            if result.stderr:
-                print(result.stderr)
-    except Exception as exc:
-        print(f"[WARN] Hybrid OHLC forecast step exception: {exc}")
-
 #!/usr/bin/env python3
 """
 scripts/daily_orchestrator.py
@@ -55,6 +40,7 @@ import argparse
 import json
 import logging
 import sys
+import subprocess
 import traceback
 from datetime import date, timedelta
 from pathlib import Path
@@ -75,6 +61,22 @@ logging.basicConfig(
 logger = logging.getLogger("daily_orchestrator")
 
 
+def _run_hybrid_forecast_step_nonfatal() -> None:
+    """Run hybrid OHLC forecast generation without breaking legacy orchestration."""
+    cmd = ["python", "scripts/run_hybrid_forecast_step.py"]
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0:
+            print("[WARN] Hybrid OHLC forecast step failed; continuing legacy flow.")
+            if result.stderr:
+                print(result.stderr)
+    except Exception as exc:
+        print(f"[WARN] Hybrid OHLC forecast step exception: {exc}")
+
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _is_trading_day(d: date) -> bool:
@@ -91,7 +93,6 @@ def _is_trading_day(d: date) -> bool:
 def _send_notification(subject: str, body: str) -> None:
     """Best-effort notification via Telegram → Slack → stdout."""
     import os
-import subprocess
     token   = os.getenv("TELEGRAM_TOKEN", "")
     chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
     if token and chat_id:
