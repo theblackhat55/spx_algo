@@ -36,6 +36,7 @@ from src.features.calendar_features import compute_calendar_features
 from src.features.options_features  import compute_all_options_features
 from src.features.lagged_targets    import compute_lagged_target_features
 from src.features.events            import compute_event_features
+from src.features.es_features        import load_es_daily_features
 from src.data.calendar              import build_trading_calendar
 
 logger = logging.getLogger(__name__)
@@ -117,6 +118,15 @@ def build_feature_matrix(
         except Exception as exc:
             logger.warning("Could not load options summary file: %s", exc)
 
+    es_df = None
+    es_path = raw_dir / ES_FILE
+    if es_path.exists():
+        try:
+            es_df = pd.read_parquet(es_path)
+            logger.info("ES daily data loaded (%d rows).", len(es_df))
+        except Exception as exc:
+            logger.warning("Could not load ES daily file: %s", exc)
+
     # ── Compute feature groups ────────────────────────────────────────────────
     logger.info("Computing proximity features …")
     prox = compute_proximity_features(spx)
@@ -145,11 +155,18 @@ def build_feature_matrix(
     event_path = raw_dir.parent / "reference" / "event_calendar.csv"
     events = compute_event_features(spx.index, event_path)
 
+    es_feat = pd.DataFrame(index=spx.index)
+    if es_df is not None:
+        logger.info("Computing ES daily features …")
+        es_feat = load_es_daily_features(str(es_path), spx_df=spx)
+
     # ── Inner join on date index ──────────────────────────────────────────────
     logger.info("Merging feature groups …")
     frames = [prox, vol, tech, cal_feat, lagged, events]
     if not opts.empty:
         frames.append(opts)
+    if not es_feat.empty:
+        frames.append(es_feat)
 
     features = pd.concat(frames, axis=1, join="inner")
 
