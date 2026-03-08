@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict
 import json
 
 import numpy as np
 import pandas as pd
 
 from src.models.ohlc_forecaster import OHLC_TARGET_COLUMNS
+
+
+ERROR_METRIC_NAMES = {"mae", "rmse"}
+HIGHER_IS_BETTER_NAMES = {"close_direction_accuracy"}
 
 
 def build_naive_component_baseline(
@@ -24,6 +28,32 @@ def build_naive_component_baseline(
         index=y_test_index,
     )
     return baseline
+
+
+def build_rolling_component_baseline(
+    y_all: pd.DataFrame,
+    y_test_index: pd.Index,
+    window: int = 20,
+) -> pd.DataFrame:
+    missing = [c for c in OHLC_TARGET_COLUMNS if c not in y_all.columns]
+    if missing:
+        raise ValueError(f"Missing OHLC target columns in y_all: {missing}")
+
+    y_all = y_all.sort_index()
+    preds = []
+
+    for dt in y_test_index:
+        hist = y_all.loc[y_all.index < dt, OHLC_TARGET_COLUMNS]
+        if hist.empty:
+            row = pd.Series({c: 0.0 for c in OHLC_TARGET_COLUMNS}, name=dt)
+        else:
+            row = hist.tail(window).mean()
+            row.name = dt
+        preds.append(row)
+
+    baseline = pd.DataFrame(preds)
+    baseline.index = y_test_index
+    return baseline[OHLC_TARGET_COLUMNS]
 
 
 def reconstruct_baseline_ohlc(
@@ -101,17 +131,29 @@ def evaluate_ohlc_frame(
 def compare_metric_dicts(model_metrics: dict, baseline_metrics: dict) -> dict:
     out = {}
     shared = set(model_metrics).intersection(baseline_metrics)
+
     for key in sorted(shared):
         mv = model_metrics[key]
         bv = baseline_metrics[key]
 
         if isinstance(mv, dict) and isinstance(bv, dict):
-            out[key] = {}
+            sub = {}
             for subk in sorted(set(mv).intersection(bv)):
-                if isinstance(mv[subk], (int, float)) and isinstance(bv[subk], (int, float)):
-                    out[key][subk] = float(bv[subk] - mv[subk])
+                if not isinstance(mv[subk], (int, float)) or not isinstance(bv[subk], (int, float)):
+                    continue
+                if subk in ERROR_METRIC_NAMES:
+                    sub[subk] = float(bv[subk] - mv[subk])
+                elif subk in HIGHER_IS_BETTER_NAMES:
+                    sub[subk] = float(mv[subk] - bv[subk])
+            if sub:
+                out[key] = sub
+
         elif isinstance(mv, (int, float)) and isinstance(bv, (int, float)):
-            out[key] = float(mv - bv)
+            if key in HIGHER_IS_BETTER_NAMES:
+                out[key] = float(mv - bv)
+            elif key in ERROR_METRIC_NAMES:
+                out[key] = float(bv - mv)
+
     return out
 
 
@@ -138,15 +180,48 @@ def export_feature_importance_csvs(
         imp.head(top_n).to_csv(output_path / f"{target}_feature_importance.csv", index=False)
 
 
+def export_feature_importance_summary(
+    models: Dict[str, object],
+    feature_names: pd.Index,
+    output_file: str | Path,
+    top_n: int = 10,
+) -> None:
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    lines = []
+    for target, model in models.items():
+        lines.append(f"## {target}")
+        if not hasattr(model, "feature_importances_"):
+            lines.append("No feature_importances_ available")
+            lines.append("")
+            continue
+
+        imp = pd.DataFrame(
+            {
+                "feature": list(feature_names),
+                "importance": model.feature_importances_,
+            }
+        ).sort_values("importance", ascending=False)
+
+        for _, row in imp.head(top_n).iterrows():
+            lines.append(f"- {row['feature']}: {row['importance']}")
+        lines.append("")
+
+    output_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def export_detailed_test_predictions(
     output_file: str | Path,
     actual_ohlc: pd.DataFrame,
     prev_close: pd.Series,
     y_test: pd.DataFrame,
     model_components: pd.DataFrame,
-    baseline_components: pd.DataFrame,
+    mean_baseline_components: pd.DataFrame,
+    rolling_baseline_components: pd.DataFrame,
     model_ohlc: pd.DataFrame,
-    baseline_ohlc: pd.DataFrame,
+    mean_baseline_ohlc: pd.DataFrame,
+    rolling_baseline_ohlc: pd.DataFrame,
 ) -> None:
     idx = y_test.index
     df = pd.DataFrame(index=idx)
@@ -160,11 +235,13 @@ def export_detailed_test_predictions(
     for col in OHLC_TARGET_COLUMNS:
         df[f"actual_{col}"] = y_test[col]
         df[f"model_{col}"] = model_components[col]
-        df[f"baseline_{col}"] = baseline_components[col]
+        df[f"mean_baseline_{col}"] = mean_baseline_components[col]
+        df[f"rolling_baseline_{col}"] = rolling_baseline_components[col]
 
     for col in ["pred_open", "pred_high", "pred_low", "pred_close"]:
         df[f"model_{col}"] = model_ohlc[col]
-        df[f"baseline_{col}"] = baseline_ohlc[col]
+        df[f"mean_baseline_{col}"] = mean_baseline_ohlc[col]
+        df[f"rolling_baseline_{col}"] = rolling_baseline_ohlc[col]
 
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
