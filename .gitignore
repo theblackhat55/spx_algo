@@ -60,3 +60,11 @@ output/models/*.pkl
 output/reports/*.csv
 output/reports/*.log
 data/processed/market_intel.json
+
+# Runtime artifacts
+output/analysis/
+output/forecasts/
+output/reports/
+output/models/
+.venv/
+.env
