@@ -41,4 +41,4 @@ def test_compare_metric_dicts():
 
     assert out["open"]["mae"] == 2.0
     assert out["open"]["rmse"] == 3.0
-    assert out["close_direction_accuracy"] == 0.04
+    assert abs(out["close_direction_accuracy"] - 0.04) < 1e-12
