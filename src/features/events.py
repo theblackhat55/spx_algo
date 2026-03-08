@@ -30,11 +30,8 @@ import pandas as pd
 
 DEFAULT_EVENT_COLUMNS = [
     "is_cpi_day",
-    "is_fomc_day",
     "is_nfp_day",
     "is_opex_day",
-    "is_month_end",
-    "is_quarter_end",
     "is_holiday_adjacent",
 ]
 
@@ -107,24 +104,10 @@ def compute_event_features(
     # Derived deterministic flags from trading calendar itself
     idx_series = pd.Series(idx, index=idx)
 
-    # month-end: next trading day is in a different month
     next_trade = idx_series.shift(-1)
-    valid_next = next_trade.notna()
-    out["is_month_end"] = (
-        ((next_trade.dt.month != idx_series.dt.month) & valid_next)
-        .fillna(False)
-        .astype(int)
-    )
-
-    # quarter-end: next trading day is in a different quarter
-    out["is_quarter_end"] = (
-        ((next_trade.dt.quarter != idx_series.dt.quarter) & valid_next)
-        .fillna(False)
-        .astype(int)
-    )
+    prev_trade = idx_series.shift(1)
 
     # holiday-adjacent: large gap between trading sessions (typically >= 3 calendar days)
-    prev_trade = idx_series.shift(1)
     next_gap = (next_trade - idx_series).dt.days
     prev_gap = (idx_series - prev_trade).dt.days
 

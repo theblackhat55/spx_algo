@@ -33,16 +33,13 @@ def test_compute_event_features_with_manual_flags():
         assert out.loc[pd.Timestamp("2026-01-14"), "is_cpi_day"] == 0
 
 
-def test_month_end_detection():
-    idx = pd.to_datetime(["2026-01-30", "2026-02-02"])
+def test_holiday_adjacent_detection():
+    idx = pd.to_datetime(["2026-01-16", "2026-01-20", "2026-01-21"])
     out = compute_event_features(idx)
-    assert out.loc[pd.Timestamp("2026-01-30"), "is_month_end"] == 1
+    assert out.loc[pd.Timestamp("2026-01-16"), "is_holiday_adjacent"] == 1
+    assert out.loc[pd.Timestamp("2026-01-20"), "is_holiday_adjacent"] == 1
 
 
-def test_quarter_end_detection():
-    idx = pd.to_datetime(["2026-03-31", "2026-04-01"])
-    out = compute_event_features(idx)
-    assert out.loc[pd.Timestamp("2026-03-31"), "is_quarter_end"] == 1
 
 
 def test_holiday_adjacent_detection():
