@@ -76,6 +76,21 @@ def _run_hybrid_forecast_step_nonfatal() -> None:
         print(f"[WARN] Hybrid OHLC forecast step exception: {exc}")
 
 
+def _run_gap_augmented_hybrid_forecast_step_nonfatal() -> None:
+    """Run Databento gap-augmented hybrid OHLC forecast generation non-fatally."""
+    cmd = ["python", "scripts/run_gap_augmented_hybrid_forecast_step.py"]
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0:
+            print("[WARN] Gap-augmented hybrid OHLC forecast step failed; continuing legacy flow.")
+            if result.stderr:
+                print(result.stderr)
+    except Exception as exc:
+        print(f"[WARN] Gap-augmented hybrid OHLC forecast step exception: {exc}")
+
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -251,6 +266,7 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _run_gap_augmented_hybrid_forecast_step_nonfatal()
     _run_hybrid_forecast_step_nonfatal()
     args  = _parse_args()
     today = args.date or date.today().strftime("%Y-%m-%d")
