@@ -28,6 +28,7 @@ from config.settings import (
     FEATURES_FILE,
     GEX_FILE,
     OPTIONS_DAILY_FILE,
+    ES_FILE,
 )
 from src.features.proximity        import compute_proximity_features
 from src.features.volatility       import compute_all_volatility_features
