@@ -27,6 +27,7 @@ from config.settings import (
     CALENDAR_FILE,
     FEATURES_FILE,
     GEX_FILE,
+    OPTIONS_DAILY_FILE,
 )
 from src.features.proximity        import compute_proximity_features
 from src.features.volatility       import compute_all_volatility_features
@@ -108,6 +109,14 @@ def build_feature_matrix(
         except Exception as exc:
             logger.warning("Could not load GEX file: %s", exc)
 
+    options_summary_df = None
+    if OPTIONS_DAILY_FILE.exists():
+        try:
+            options_summary_df = pd.read_csv(OPTIONS_DAILY_FILE, index_col=0, parse_dates=True)
+            logger.info("Options summary data loaded (%d rows).", len(options_summary_df))
+        except Exception as exc:
+            logger.warning("Could not load options summary file: %s", exc)
+
     # ── Compute feature groups ────────────────────────────────────────────────
     logger.info("Computing proximity features …")
     prox = compute_proximity_features(spx)
@@ -122,7 +131,12 @@ def build_feature_matrix(
     cal_feat = compute_calendar_features(spx, calendar)
 
     logger.info("Computing options features …")
-    opts = compute_all_options_features(spx, vix, gex_df=gex_df)
+    opts = compute_all_options_features(
+        spx,
+        vix,
+        gex_df=gex_df,
+        options_summary_df=options_summary_df,
+    )
 
     logger.info("Computing lagged-target features …")
     lagged = compute_lagged_target_features(spx)
