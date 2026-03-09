@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.evaluate_databento_overnight_experiment import _metric_diff
+from scripts.experiments.evaluate_databento_overnight_experiment import _metric_diff
 
 
 def test_metric_diff_nested():
