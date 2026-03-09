@@ -69,6 +69,7 @@ TARGETS_FILE  = PROCESSED_DATA_DIR / "targets.parquet"
 
 # ── External data ─────────────────────────────────────────────────────────────
 GEX_FILE = EXTERNAL_DATA_DIR / "gex_daily.csv"
+OPTIONS_DAILY_FILE = EXTERNAL_DATA_DIR / "options_daily.csv"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FEATURE SETTINGS

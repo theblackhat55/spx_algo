@@ -40,6 +40,7 @@ import argparse
 import json
 import logging
 import sys
+import subprocess
 import traceback
 from datetime import date, timedelta
 from pathlib import Path
@@ -58,6 +59,37 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("daily_orchestrator")
+
+
+def _run_hybrid_forecast_step_nonfatal() -> None:
+    """Run hybrid OHLC forecast generation without breaking legacy orchestration."""
+    cmd = ["python", "scripts/run_hybrid_forecast_step.py"]
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0:
+            print("[WARN] Hybrid OHLC forecast step failed; continuing legacy flow.")
+            if result.stderr:
+                print(result.stderr)
+    except Exception as exc:
+        print(f"[WARN] Hybrid OHLC forecast step exception: {exc}")
+
+
+def _run_gap_augmented_hybrid_forecast_step_nonfatal() -> None:
+    """Run Databento gap-augmented hybrid OHLC forecast generation non-fatally."""
+    cmd = ["python", "scripts/run_gap_augmented_hybrid_forecast_step.py"]
+    try:
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True)
+        if result.stdout:
+            print(result.stdout)
+        if result.returncode != 0:
+            print("[WARN] Gap-augmented hybrid OHLC forecast step failed; continuing legacy flow.")
+            if result.stderr:
+                print(result.stderr)
+    except Exception as exc:
+        print(f"[WARN] Gap-augmented hybrid OHLC forecast step exception: {exc}")
+
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -124,11 +156,8 @@ def step_fetch() -> bool:
 def step_features() -> bool:
     logger.info("Step 3 — feature engineering")
     try:
-        import pandas as pd
         from src.features.builder  import build_feature_matrix
 
-        spx_path = _DATA_RAW_DIR / "spx_daily.parquet"
-        spx = pd.read_parquet(spx_path)
         feats = build_feature_matrix()
         _DATA_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
         feats.to_parquet(_DATA_PROCESSED_DIR / "features.parquet")
@@ -152,11 +181,14 @@ def step_generate(as_of_date: str, mode: str, signal_dir: Path) -> Optional[obje
 
         signal_dir.mkdir(parents=True, exist_ok=True)
         out_path = signal_dir / f"signal_{as_of_date}.json"
-        out_path.write_text(sig.to_json(), encoding="utf-8")
+        payload = sig.to_json()
+        out_path.write_text(payload, encoding="utf-8")
+
         latest = signal_dir / "latest_signal.json"
-        if latest.exists():
-            latest.unlink()
-        latest.symlink_to(out_path.name)
+        tmp_latest = signal_dir / "latest_signal.tmp.json"
+        tmp_latest.write_text(payload, encoding="utf-8")
+        tmp_latest.replace(latest)
+
         logger.info("Signal → %s  tradeable=%s  regime=%s",
                     out_path, sig.tradeable, sig.regime)
         return sig
@@ -190,7 +222,12 @@ def step_log_outcome(as_of_date: str) -> None:
         spx.index = pd.to_datetime(spx.index)
         # Find the row for the signal_date stored in the paper-trade log
         pl = PaperTradeLogger()
-        df = pl._read_df()
+        if hasattr(pl, "read_log"):
+            df = pl.read_log()
+        elif hasattr(pl, "_read_df"):
+            df = pl._read_df()
+        else:
+            raise AttributeError("PaperTradeLogger has neither read_log() nor _read_df()")
         if df.empty:
             logger.info("No signal rows found — skipping outcome logging")
             return
@@ -234,6 +271,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _run_gap_augmented_hybrid_forecast_step_nonfatal()
+    _run_hybrid_forecast_step_nonfatal()
     args  = _parse_args()
     today = args.date or date.today().strftime("%Y-%m-%d")
 
