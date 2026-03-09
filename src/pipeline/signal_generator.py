@@ -141,6 +141,86 @@ def _model_hash(path: Path) -> str:
     return h.hexdigest()[:12]
 
 
+def _model_feature_names(model) -> Optional[List[str]]:
+    """Best-effort extraction of trained feature names from model artifacts."""
+    names = getattr(model, "feature_names_in_", None)
+    if names is not None:
+        try:
+            return [str(x) for x in list(names)]
+        except Exception:
+            pass
+
+    inner = getattr(model, "_model", None)
+    if inner is not None:
+        names = getattr(inner, "feature_names_in_", None)
+        if names is not None:
+            try:
+                return [str(x) for x in list(names)]
+            except Exception:
+                pass
+
+        booster = getattr(inner, "booster_", None)
+        if booster is not None:
+            try:
+                out = booster.feature_name()
+                if out:
+                    return [str(x) for x in list(out)]
+            except Exception:
+                pass
+
+        try:
+            out = inner.feature_name_
+            if out:
+                return [str(x) for x in list(out)]
+        except Exception:
+            pass
+
+    booster = getattr(model, "booster_", None)
+    if booster is not None:
+        try:
+            out = booster.feature_name()
+            if out:
+                return [str(x) for x in list(out)]
+        except Exception:
+            pass
+
+    try:
+        out = model.feature_name_
+        if out:
+            return [str(x) for x in list(out)]
+    except Exception:
+        pass
+
+    return None
+
+
+def _align_features_for_model(
+    X: pd.DataFrame,
+    model,
+    notes: Optional[List[str]] = None,
+    context: str = "inference",
+) -> pd.DataFrame:
+    """Align X to the model's trained feature schema when available."""
+    if model is None:
+        return X
+    feature_names = _model_feature_names(model)
+    if not feature_names:
+        return X
+
+    missing = [c for c in feature_names if c not in X.columns]
+    extra = [c for c in X.columns if c not in feature_names]
+
+    if notes is not None and (missing or extra):
+        notes.append(
+            f"{context}: aligned features to model schema "
+            f"(expected={len(feature_names)}, got={X.shape[1]}, "
+            f"missing={len(missing)}, extra={len(extra)})"
+        )
+
+    aligned = X.reindex(columns=feature_names, fill_value=0.0)
+    return aligned
+
+
 # ---------------------------------------------------------------------------
 # Minimal in-process regression trainer
 # ---------------------------------------------------------------------------
@@ -174,14 +254,25 @@ def _load_model_artifact(model_dir: Path, target_name: str):
             label = part
             break
 
-    stems = [f"regressor_{target_name}", f"model_{target_name}", target_name]
-    # Also search for the walk-forward trainer's canonical naming: regressor_target_<high|low>_pct
+    stems = []
+
+    # Prefer explicit model-family artifacts first; these are the validated
+    # walk-forward outputs and should outrank generic target-name pickles.
     if label:
-        stems.insert(0, f"regressor_target_{label}_pct")
-    if label:
-        for model_type in ("catboost", "lightgbm", "xgboost",
-                           "huber_xgboost", "huber_lightgbm", "ridge"):
+        for model_type in (
+            "lightgbm",
+            "ridge",
+            "xgboost",
+            "huber_lightgbm",
+            "huber_xgboost",
+            "catboost",
+        ):
             stems.append(f"regressor_{model_type}_{label}")
+
+    # Then try generic target-name artifacts last.
+    if label:
+        stems.append(f"regressor_target_{label}_pct")
+    stems.extend([f"regressor_{target_name}", f"model_{target_name}", target_name])
 
     for stem in stems:
         path = model_dir / f"{stem}.pkl"
@@ -310,6 +401,7 @@ def _calibrate_conformal(
 
         valid_idx = target.dropna().index
         X_all = features.loc[valid_idx].fillna(0)
+        X_all = _align_features_for_model(X_all, model, context="adaptive_conformal")
         y_all = target.loc[valid_idx]
 
         if len(y_all) < cal_tail + 10:
@@ -338,6 +430,7 @@ def _calibrate_conformal(
 
         valid_idx = target.dropna().index
         X_all = features.loc[valid_idx].fillna(0)
+        X_all = _align_features_for_model(X_all, model, context="standard_conformal")
         y_all = target.loc[valid_idx]
 
         if len(y_all) < cal_tail + 10:
@@ -367,6 +460,7 @@ def validate_conformal_coverage(
         window = len(valid_idx)
 
     X_val = features.loc[valid_idx].iloc[-window:].fillna(0)
+    X_val = _align_features_for_model(X_val, cp.model, context="coverage_validation")
     y_val = target.loc[valid_idx].iloc[-window:]
 
     intervals = cp.predict_interval(X_val)
@@ -605,8 +699,10 @@ class SignalGenerator:
 
         # ── Generate predictions + intervals ─────────────────────────
         last_X = features.iloc[[-1]].fillna(0)
-        intervals_high = cp_high.predict_interval(last_X) if cp_high else None
-        intervals_low  = cp_low.predict_interval(last_X)  if cp_low  else None
+        high_last_X = _align_features_for_model(last_X, getattr(cp_high, "model", None), notes, context="high_interval") if cp_high else None
+        low_last_X = _align_features_for_model(last_X, getattr(cp_low, "model", None), notes, context="low_interval") if cp_low else None
+        intervals_high = cp_high.predict_interval(high_last_X) if cp_high else None
+        intervals_low  = cp_low.predict_interval(low_last_X)  if cp_low  else None
 
         # ── Classification probabilities ──────────────────────────────
         clf_probs = self._classification_predict(features, notes)
@@ -737,8 +833,9 @@ class SignalGenerator:
                 notes.append(f"Insufficient data for {name} model")
                 continue
             try:
+                fit_X = features.loc[target.dropna().index].fillna(0)
                 model = _fit_regression_model(
-                    features.loc[target.dropna().index].fillna(0),
+                    fit_X,
                     target.dropna(),
                     seed=self.seed,
                     model_dir=model_dir,        # try artifact first
@@ -746,6 +843,7 @@ class SignalGenerator:
                 cp = _calibrate_conformal(model, features, target)
 
                 last_X = features.iloc[[-1]].fillna(0)
+                last_X = _align_features_for_model(last_X, model, notes, context=f"{name}_predict")
                 pred_val = float(model.predict(last_X)[0])
                 pred_pcts[f"pred_{name}_pct"] = pred_val
 
@@ -835,6 +933,7 @@ class SignalGenerator:
                 from src.models.base_model import BaseModel
                 model = BaseModel.load(model_path)
                 last_X = features.iloc[[-1]].fillna(0)
+                last_X = _align_features_for_model(last_X, model, notes, context=f"classifier_{target}")
                 prob = float(model.predict_proba(last_X)[0, 1])
                 key = f"prob_{'high' if 'high' in target else 'low'}_bin_050"
                 result[key] = prob
