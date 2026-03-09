@@ -156,11 +156,8 @@ def step_fetch() -> bool:
 def step_features() -> bool:
     logger.info("Step 3 — feature engineering")
     try:
-        import pandas as pd
         from src.features.builder  import build_feature_matrix
 
-        spx_path = _DATA_RAW_DIR / "spx_daily.parquet"
-        spx = pd.read_parquet(spx_path)
         feats = build_feature_matrix()
         _DATA_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
         feats.to_parquet(_DATA_PROCESSED_DIR / "features.parquet")
@@ -184,11 +181,14 @@ def step_generate(as_of_date: str, mode: str, signal_dir: Path) -> Optional[obje
 
         signal_dir.mkdir(parents=True, exist_ok=True)
         out_path = signal_dir / f"signal_{as_of_date}.json"
-        out_path.write_text(sig.to_json(), encoding="utf-8")
+        payload = sig.to_json()
+        out_path.write_text(payload, encoding="utf-8")
+
         latest = signal_dir / "latest_signal.json"
-        if latest.exists():
-            latest.unlink()
-        latest.symlink_to(out_path.name)
+        tmp_latest = signal_dir / "latest_signal.tmp.json"
+        tmp_latest.write_text(payload, encoding="utf-8")
+        tmp_latest.replace(latest)
+
         logger.info("Signal → %s  tradeable=%s  regime=%s",
                     out_path, sig.tradeable, sig.regime)
         return sig
@@ -222,7 +222,12 @@ def step_log_outcome(as_of_date: str) -> None:
         spx.index = pd.to_datetime(spx.index)
         # Find the row for the signal_date stored in the paper-trade log
         pl = PaperTradeLogger()
-        df = pl._read_df()
+        if hasattr(pl, "read_log"):
+            df = pl.read_log()
+        elif hasattr(pl, "_read_df"):
+            df = pl._read_df()
+        else:
+            raise AttributeError("PaperTradeLogger has neither read_log() nor _read_df()")
         if df.empty:
             logger.info("No signal rows found — skipping outcome logging")
             return

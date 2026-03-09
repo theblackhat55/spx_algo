@@ -134,13 +134,6 @@ def _compute_metrics(pred: Dict[str, float], actual: Dict[str, float]) -> Dict[s
         (actual["high"] <= pred["high"]) and (actual["low"] >= pred["low"])
     )
 
-    prev_close_proxy = actual["open"]
-    out["close_direction_correct"] = float(
-        (pred["close"] - prev_close_proxy) * (actual["close"] - prev_close_proxy) >= 0
-    )
-    out["gap_sign_correct_proxy"] = float(
-        (pred["open"] - prev_close_proxy) * (actual["open"] - prev_close_proxy) >= 0
-    )
     return out
 
 
@@ -150,8 +143,7 @@ def _winner(hybrid_metrics: Dict[str, float], rs_metrics: Dict[str, float]) -> D
         "mean_ohlc_mae", "ohlc_rmse", "range_abs_error"
     }
     higher_better = {
-        "high_coverage", "low_coverage", "inside_range_coverage",
-        "close_direction_correct", "gap_sign_correct_proxy"
+        "high_coverage", "low_coverage", "inside_range_coverage"
     }
 
     verdict = {}

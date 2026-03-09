@@ -78,11 +78,12 @@ def main():
         str(compare_script),
         "--hybrid-json", str(hybrid_path),
         "--range-skew-json", str(rs_path),
+        "--date", args.date,
         "--outdir", args.outdir,
     ]
 
     if args.allow_date_override:
-        cmd.extend(["--date", args.date])
+        cmd.append("--allow-date-override")
 
     print("Running archived daily comparison:")
     print("  hybrid forecast:     ", hybrid_path)

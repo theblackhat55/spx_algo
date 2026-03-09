@@ -238,6 +238,25 @@ Key parameters in code:
 | Friction | $0.40/condor ($0.10/leg × 4) | `engine.py` PositionConfig |
 | Walk-forward folds | 265 | `walk_forward_train.py` |
 
+
+## Experimental Range-Forecast Workflow
+
+The `feature/phase-6c-es-overnight` branch adds an experimental Databento-enhanced forecasting workflow for SPX daily OHLC/range research.
+
+Key scripts:
+- `scripts/walkforward_backtest_base_ohlc.py` — base walk-forward OHLC benchmark
+- `scripts/walkforward_backtest_gap_augmented_hybrid.py` — Databento gap-augmented hybrid walk-forward test
+- `scripts/compare_walkforward_base_vs_gap_hybrid.py` — overlap comparison of base vs hybrid
+- `scripts/evaluate_hybrid_plus_range_model.py` — holdout evaluation of hybrid + direct range overlay
+- `scripts/evaluate_hybrid_range_and_skew_model.py` — holdout evaluation of hybrid + range + skew overlay
+- `scripts/generate_gap_augmented_range_skew_forecast.py` — generate latest experimental range+skew forecast
+- `scripts/run_gap_augmented_range_skew_forecast_step.py` — archive latest experimental forecast
+- `scripts/compare_daily_hybrid_vs_range_skew_actuals.py` — compare archived forecasts against Yahoo SPX actuals
+- `scripts/run_daily_forecast_comparison_step.py` — archived comparison runner
+- `scripts/print_latest_expected_range.py` — quick operational summary for latest forecast
+
+**Important:** These range/range+skew overlay scripts are research utilities and should be treated as experimental until validated over a sufficiently long forward period.
+
 ## Scripts
 
 | Script | Purpose |

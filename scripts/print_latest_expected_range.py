@@ -87,6 +87,13 @@ def main():
     hybrid_ohlc = _extract_ohlc(hybrid_payload, "hybrid forecast")
     rs_ohlc = _extract_ohlc(rs_payload, "range+skew forecast")
 
+    hybrid_forecast_date = _forecast_date(hybrid_payload)
+    rs_forecast_date = _forecast_date(rs_payload)
+    if hybrid_forecast_date != rs_forecast_date:
+        raise SystemExit(
+            f"Forecast date mismatch: hybrid={hybrid_forecast_date}, range_skew={rs_forecast_date}"
+        )
+
     hybrid_summary = _fmt_ohlc(hybrid_ohlc)
     rs_summary = _fmt_ohlc(rs_ohlc)
 

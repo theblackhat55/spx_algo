@@ -68,3 +68,6 @@ output/reports/
 output/models/
 .venv/
 .env
+
+# Backtest artifacts
+output/backtests/
