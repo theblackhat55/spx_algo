@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 
 DEFAULT_START = "2024-01-01"
-DEFAULT_END = "2026-03-08"
+DEFAULT_END = pd.Timestamp.utcnow().strftime("%Y-%m-%d")
 DEFAULT_DATASET = "GLBX.MDP3"
 DEFAULT_SCHEMA = "ohlcv-1m"
 DEFAULT_SYMBOL = "ES.c.0"
