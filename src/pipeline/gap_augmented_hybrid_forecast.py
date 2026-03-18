@@ -38,12 +38,18 @@ def generate_gap_augmented_hybrid_forecast(
     db_feat = load_es_databento_overnight_features()
     db_feat.index = pd.to_datetime(db_feat.index)
 
-    latest_date = base_features.index.max()
+    common_dates = base_features.index.intersection(db_feat.index)
+    if common_dates.empty:
+        raise RuntimeError("No overlapping dates between base features and Databento overnight features")
+
+    latest_date = common_dates.max()
     latest_base_row = base_features.loc[[latest_date]]
 
-    gap_X = build_gap_feature_matrix(base_features.loc[[latest_date]], db_feat)
+    gap_X = build_gap_feature_matrix(latest_base_row, db_feat)
     if gap_X.empty:
-        raise RuntimeError(f"No Databento gap features available for latest date {latest_date.date()}")
+        raise RuntimeError(
+            f"No Databento gap features available for latest common date {latest_date.date()}"
+        )
 
     component_models = load_models(ohlc_model_dir)
     component_preds = predict_ohlc_components(component_models, latest_base_row)

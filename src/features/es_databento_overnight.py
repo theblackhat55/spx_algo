@@ -4,9 +4,10 @@ import pandas as pd
 
 
 OVERNIGHT_START_UTC_HOUR = 23  # previous calendar day 23:00 UTC
-PREOPEN_END_HOUR = 14          # current day up to 14:29 UTC
-PREOPEN_LAST_60_START = (13, 30)
-PREOPEN_LAST_30_START = (14, 0)
+PREOPEN_END_HOUR = 12
+PREOPEN_END_MINUTE = 29
+PREOPEN_LAST_60_START = (11, 30)
+PREOPEN_LAST_30_START = (12, 0)
 
 
 def _ensure_utc_index(df: pd.DataFrame) -> pd.DataFrame:
@@ -38,7 +39,14 @@ def build_es_databento_overnight_features(df_1m: pd.DataFrame) -> pd.DataFrame:
     for session_date, g in work.groupby("session_date", sort=True):
         # keep only overnight + preopen portion:
         # previous day 23:00 UTC through current day 14:29 UTC
-        mask = ((g.index.hour >= 23) | (g.index.hour < 14) | ((g.index.hour == 14) & (g.index.minute <= 29)))
+        mask = (
+            (g.index.hour >= OVERNIGHT_START_UTC_HOUR)
+            | (g.index.hour < PREOPEN_END_HOUR)
+            | (
+                (g.index.hour == PREOPEN_END_HOUR)
+                & (g.index.minute <= PREOPEN_END_MINUTE)
+            )
+        )
         s = g.loc[mask].copy()
         if s.empty:
             continue
@@ -53,12 +61,24 @@ def build_es_databento_overnight_features(df_1m: pd.DataFrame) -> pd.DataFrame:
         overnight_range_pct = ((overnight_high - overnight_low) / overnight_open) if overnight_open else 0.0
 
         preopen_60 = s.loc[
-            ((s.index.hour == PREOPEN_LAST_60_START[0]) & (s.index.minute >= PREOPEN_LAST_60_START[1])) |
-            ((s.index.hour == 14) & (s.index.minute <= 29))
+            (
+                (s.index.hour == PREOPEN_LAST_60_START[0])
+                & (s.index.minute >= PREOPEN_LAST_60_START[1])
+            )
+            | (
+                (s.index.hour == PREOPEN_END_HOUR)
+                & (s.index.minute <= PREOPEN_END_MINUTE)
+            )
         ]
         preopen_30 = s.loc[
-            ((s.index.hour == PREOPEN_LAST_30_START[0]) & (s.index.minute >= PREOPEN_LAST_30_START[1])) |
-            ((s.index.hour == 14) & (s.index.minute <= 29))
+            (
+                (s.index.hour == PREOPEN_LAST_30_START[0])
+                & (s.index.minute >= PREOPEN_LAST_30_START[1])
+            )
+            | (
+                (s.index.hour == PREOPEN_END_HOUR)
+                & (s.index.minute <= PREOPEN_END_MINUTE)
+            )
         ]
 
         if preopen_60.empty:
