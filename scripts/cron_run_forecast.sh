@@ -34,3 +34,6 @@ echo "[$(date -Is)] STEP range+skew forecast"
 python3.11 /root/spx_algo/scripts/run_gap_augmented_range_skew_forecast_step.py
 
 echo "[$(date -Is)] END forecast"
+
+python3.11 scripts/build_health_snapshot.py
+python3.11 scripts/render_ops_summary.py

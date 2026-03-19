@@ -8,3 +8,7 @@ echo "[$(date -Is)] START comparison"
 export PYTHONPATH=/root/spx_algo
 python /root/spx_algo/scripts/run_daily_forecast_comparison_step.py --date "$(date +%F)" || true
 echo "[$(date -Is)] END comparison"
+
+python3.11 scripts/build_forecast_monitor_snapshot.py
+python3.11 scripts/build_retraining_recommendation.py
+python3.11 scripts/render_ops_summary.py
