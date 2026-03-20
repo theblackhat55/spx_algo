@@ -73,7 +73,8 @@ def generate_gap_augmented_hybrid_forecast(
 
     pred_ohlc = reconstruct_ohlc(prev_close=prev_close, component_preds=component_preds)
 
-    forecast_for_date = _next_business_day(pd.Timestamp(latest_date))
+    latest_spx_date = pd.to_datetime(raw_spx.index).max()
+    forecast_for_date = _next_business_day(pd.Timestamp(latest_spx_date))
 
     return {
         "forecast_for_date": str(forecast_for_date.date()),

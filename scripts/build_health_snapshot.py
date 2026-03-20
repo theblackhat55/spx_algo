@@ -97,6 +97,13 @@ def main() -> None:
         elif h_ffd != r_ffd or h_gfd != r_gfd:
             forecast_status = "WARN"
             reasons.append("hybrid/range-skew forecast dates do not match")
+        else:
+            signal_date = None if signal is None else signal.get("signal_date")
+            if signal_date and h_ffd != signal_date:
+                forecast_status = "WARN"
+                reasons.append(
+                    f"forecast_for_date {h_ffd} does not match signal_date {signal_date}"
+                )
 
     if not SCORECARD_PATH.exists():
         comparison_status = "WARN"
