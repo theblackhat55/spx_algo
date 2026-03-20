@@ -8,3 +8,6 @@ echo "[$(date -Is)] START daily signal"
 export PYTHONPATH=/root/spx_algo
 bash /root/spx_algo/scripts/daily_cron.sh
 echo "[$(date -Is)] END daily signal"
+
+python3.11 scripts/build_health_snapshot.py
+python3.11 scripts/render_ops_summary.py

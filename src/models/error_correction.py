@@ -38,6 +38,7 @@ MIN_HISTORY_DAYS = 20
 ROLLING_WINDOW = 60
 MAX_CORRECTION_PCT = 0.005  # ±0.5% of SPX
 DISABLE_AFTER_N_WORSE = 10
+SAFETY_STATE_PATH = Path('output/monitoring/error_correction_safety.json')
 
 
 class ErrorCorrector:
@@ -48,6 +49,7 @@ class ErrorCorrector:
         self.model_low: Optional[Ridge] = None
         self.active = False
         self.consecutive_worse = 0
+        self._load_safety_state()
         self._load_models()
 
     def _load_models(self):
@@ -120,6 +122,55 @@ class ErrorCorrector:
         logger.info("Error correction fitted: %s", metrics)
         return metrics
 
+
+
+    def _save_safety_state(self) -> None:
+        SAFETY_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "active": getattr(self, "active", True),
+            "consecutive_worse_high": getattr(self, "consecutive_worse_high", 0),
+            "consecutive_worse_low": getattr(self, "consecutive_worse_low", 0),
+        }
+        with open(SAFETY_STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+    def _load_safety_state(self) -> None:
+        if not SAFETY_STATE_PATH.exists():
+            self.active = True
+            self.consecutive_worse_high = 0
+            self.consecutive_worse_low = 0
+            return
+        try:
+            with open(SAFETY_STATE_PATH, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            self.active = bool(payload.get("active", True))
+            self.consecutive_worse_high = int(payload.get("consecutive_worse_high", 0))
+            self.consecutive_worse_low = int(payload.get("consecutive_worse_low", 0))
+        except Exception:
+            self.active = True
+            self.consecutive_worse_high = 0
+            self.consecutive_worse_low = 0
+
+    def update_safety(self, base_high_abs_error: float, corrected_high_abs_error: float,
+                      base_low_abs_error: float, corrected_low_abs_error: float) -> None:
+        if corrected_high_abs_error > base_high_abs_error:
+            self.consecutive_worse_high += 1
+        else:
+            self.consecutive_worse_high = 0
+
+        if corrected_low_abs_error > base_low_abs_error:
+            self.consecutive_worse_low += 1
+        else:
+            self.consecutive_worse_low = 0
+
+        if (
+            self.consecutive_worse_high >= DISABLE_AFTER_N_WORSE
+            and self.consecutive_worse_low >= DISABLE_AFTER_N_WORSE
+        ):
+            self.active = False
+
+        self._save_safety_state()
+
     def correct(
         self,
         pred_high_pct: float,
@@ -181,6 +232,9 @@ class ErrorCorrector:
         return corrected_high, corrected_low, metadata
 
     def _log_correction(self, metadata: Dict):
+        if not getattr(self, "active", True):
+            return pred_high_pct, pred_low_pct, {"status": "disabled"}
+
         """Append correction to the log file."""
         CORRECTION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         row = pd.DataFrame([metadata])

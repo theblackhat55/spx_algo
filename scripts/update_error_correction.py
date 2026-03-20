@@ -114,6 +114,21 @@ def main():
         corr_h, corr_l, meta = corrector.correct(
             pred_high_pct, pred_low_pct, regime, vix, today_dow
         )
+
+        # Compare corrected vs base error on yesterday's realized actuals
+        base_high_abs_error = abs(actual_high_pct - pred_high_pct)
+        base_low_abs_error = abs(actual_low_pct - pred_low_pct)
+        corrected_high_abs_error = abs(actual_high_pct - corr_h)
+        corrected_low_abs_error = abs(actual_low_pct - corr_l)
+        corrector.update_safety(
+            base_high_abs_error=base_high_abs_error,
+            corrected_high_abs_error=corrected_high_abs_error,
+            base_low_abs_error=base_low_abs_error,
+            corrected_low_abs_error=corrected_low_abs_error,
+        )
+        print(f"  Safety status: active={getattr(corrector, 'active', True)}")
+        print(f"  Worse streak high={getattr(corrector, 'consecutive_worse_high', 0)} low={getattr(corrector, 'consecutive_worse_low', 0)}")
+
         if meta.get("correction_high"):
             print(f"\n  Today's correction would be:")
             print(f"    High: {meta['correction_high']:+.6f}%")
