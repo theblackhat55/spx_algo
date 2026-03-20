@@ -74,7 +74,8 @@ def verify_conformal_coverage(
             min_train_rows = min(200, max(50, len(X) // 4)),
             test_rows      = max(10, len(X) // 10),
             step_rows      = max(10, len(X) // 10),
-            gap_rows       = 0,
+            gap_rows       = 2,
+            embargo_rows   = 5,
             expanding      = True,
         )
         splitter = WalkForwardSplitter(cfg)

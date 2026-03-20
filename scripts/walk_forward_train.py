@@ -92,6 +92,8 @@ def main() -> None:
     try:
         from src.features.builder import build_feature_matrix
         from src.targets.engineer import engineer_targets, align_features_targets
+        from src.targets.splitter import WalkForwardSplitter
+        from src.training.config import PRODUCTION_SPLIT_CONFIG
         from src.pipeline.signal_generator import _StackingEnsemble
     except ImportError as exc:
         logger.error("Failed to import project modules: %s", exc)
@@ -135,47 +137,50 @@ def main() -> None:
     )
 
     # ── Walk-forward loop ──────────────────────────────────────────────────────
-    val_days  = args.val_days
-    n_folds   = args.folds
+    split_cfg = PRODUCTION_SPLIT_CONFIG
+    splitter = WalkForwardSplitter(split_cfg)
+    folds = splitter.split(X_full)
+
+    if args.folds:
+        folds = folds[:args.folds]
+
     fold_metrics: list[dict] = []
 
-    for fold in range(n_folds):
-        val_end   = n_rows - fold * val_days
-        val_start = val_end - val_days
-        if val_start <= 50:   # need at least 50 training rows
-            logger.warning("Not enough data for fold %d — stopping early", fold + 1)
-            break
+    for fold, (tr_idx, te_idx) in enumerate(folds, start=1):
+        X_train = X_full.iloc[tr_idx]
+        y_train = y_full.iloc[tr_idx]
+        X_val   = X_full.iloc[te_idx]
+        y_val   = y_full.iloc[te_idx]
 
-        X_train = X_full.iloc[:max(0, val_start - 5)]
-        y_train = y_full.iloc[:val_start]
-        X_val   = X_full.iloc[val_start:val_end]
-        y_val   = y_full.iloc[val_start:val_end]
+        if len(X_train) == 0 or len(X_val) == 0:
+            logger.warning("Empty split for fold %d — skipping", fold)
+            continue
 
         logger.info(
             "Fold %d/%d — train: %s→%s (%d rows) | val: %s→%s (%d rows)",
-            fold + 1, n_folds,
+            fold, len(folds),
             X_train.index[0].date(), X_train.index[-1].date(), len(X_train),
             X_val.index[0].date(),   X_val.index[-1].date(),   len(X_val),
         )
 
         try:
-            model_high = _StackingEnsemble(name=f"fold{fold+1}_high", seed=args.seed)
+            model_high = _StackingEnsemble(name=f"fold{fold}_high", seed=args.seed)
             model_high.fit(X_train.values, y_train["target_high"].values)
 
-            model_low  = _StackingEnsemble(name=f"fold{fold+1}_low",  seed=args.seed)
+            model_low  = _StackingEnsemble(name=f"fold{fold}_low", seed=args.seed)
             model_low.fit(X_train.values, y_train["target_low"].values)
 
             mae_h = float(np.mean(np.abs(
                 model_high.predict(X_val.values) - y_val["target_high"].values)))
             mae_l = float(np.mean(np.abs(
-                model_low.predict(X_val.values)  - y_val["target_low"].values)))
+                model_low.predict(X_val.values) - y_val["target_low"].values)))
 
-            fold_metrics.append({"fold": fold + 1, "mae_high": mae_h, "mae_low": mae_l})
+            fold_metrics.append({"fold": fold, "mae_high": mae_h, "mae_low": mae_l})
             if args.verbose:
-                print(f"  Fold {fold+1}: MAE high={mae_h:.2f}  low={mae_l:.2f}")
+                print(f"  Fold {fold}: MAE high={mae_h:.2f}  low={mae_l:.2f}")
 
         except Exception as exc:
-            logger.error("Fold %d failed: %s", fold + 1, exc, exc_info=True)
+            logger.error("Fold %d failed: %s", fold, exc, exc_info=True)
 
     # ── Train final model on ALL aligned data ─────────────────────────────────
     logger.info("Training final model on full dataset (%d rows) …", n_rows)

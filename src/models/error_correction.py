@@ -13,6 +13,7 @@ Safety rails:
 from __future__ import annotations
 
 import logging
+import json
 from pathlib import Path
 from typing import Dict, Optional, Tuple
 
@@ -47,10 +48,13 @@ class ErrorCorrector:
     def __init__(self):
         self.model_high: Optional[Ridge] = None
         self.model_low: Optional[Ridge] = None
-        self.active = False
+        self.active = True
         self.consecutive_worse = 0
+        self.consecutive_worse_high = 0
+        self.consecutive_worse_low = 0
         self._load_safety_state()
         self._load_models()
+        self._save_safety_state()
 
     def _load_models(self):
         """Load saved correction models if they exist."""
@@ -76,6 +80,7 @@ class ErrorCorrector:
                 "Error correction: need %d days, have %d — skipping fit",
                 MIN_HISTORY_DAYS, len(error_df)
             )
+            self._save_safety_state()
             return {"status": "insufficient_data", "days": len(error_df)}
 
         # Use rolling window
@@ -84,6 +89,7 @@ class ErrorCorrector:
 
         if len(features) < 10:
             logger.info("Error correction: insufficient features after build (%d rows)", len(features))
+            self._save_safety_state()
             return {"status": "insufficient_features", "rows": len(features)}
 
         # Align features with targets
@@ -119,6 +125,7 @@ class ErrorCorrector:
             "mean_error_high": round(float(y_high.mean()), 6),
             "mean_error_low": round(float(y_low.mean()), 6),
         }
+        self._save_safety_state()
         logger.info("Error correction fitted: %s", metrics)
         return metrics
 
@@ -232,10 +239,10 @@ class ErrorCorrector:
         return corrected_high, corrected_low, metadata
 
     def _log_correction(self, metadata: Dict):
-        if not getattr(self, "active", True):
-            return pred_high_pct, pred_low_pct, {"status": "disabled"}
-
         """Append correction to the log file."""
+        if not getattr(self, "active", True):
+            return
+
         CORRECTION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         row = pd.DataFrame([metadata])
         if CORRECTION_LOG_PATH.exists():
