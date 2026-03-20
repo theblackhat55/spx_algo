@@ -32,6 +32,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
+from src.models.manifest import validate_manifest_artifacts
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ class FullSignal:
     vix_spot:           Optional[float] = None   # raw VIX close used for credit estimation
     n_features_used:    int             = 0
     model_versions:     Dict[str, str]  = field(default_factory=dict)
+    model_identity:    Dict[str, Any]  = field(default_factory=dict)
     data_quality:       str             = "FULL"   # FULL|PARTIAL|DEGRADED
     tradeable:          bool            = False
     notes:              List[str]       = field(default_factory=list)
@@ -585,6 +587,7 @@ def assemble_signal(
         vix_spot=vix_spot,
         n_features_used=metadata.get("n_features", 0),
         model_versions=metadata.get("model_versions", {}),
+        model_identity=metadata.get("model_identity", {}),
         data_quality=metadata.get("data_quality", "FULL"),
         tradeable=tradeable,
         notes=notes,
@@ -716,15 +719,39 @@ class SignalGenerator:
             notes.append(f"Low conformal coverage: {cov}")
 
         # ── Determine data quality ────────────────────────────────────
+    
+        try:
+            from config.settings import OUTPUT_DIR
+            model_dir = Path(OUTPUT_DIR) / "models"
+        except Exception:
+            model_dir = Path("output") / "models"
+
+        manifest_check = validate_manifest_artifacts(
+            model_dir=model_dir,
+            manifest_path=model_dir / "manifest.json",
+        )
+        if not manifest_check.get("ok", False):
+            logger.warning("Model manifest validation failed: %s", manifest_check)
+
         data_quality = "FULL"
         if cp_high is None or cp_low is None:
             data_quality = "PARTIAL"
 
+        model_identity = {
+            "manifest_ok": manifest_check.get("ok", False),
+            "manifest_reason": manifest_check.get("reason"),
+            "primary_high": manifest_check.get("manifest", {}).get("primary_high"),
+            "primary_low": manifest_check.get("manifest", {}).get("primary_low"),
+            "feature_matrix_end_date": manifest_check.get("manifest", {}).get("feature_matrix_end_date"),
+            "trained_at": manifest_check.get("manifest", {}).get("trained_at"),
+        }
+
         metadata = {
-            "notes":          notes,
-            "data_quality":   data_quality,
-            "n_features":     features.shape[1],
+            "notes": notes,
+            "data_quality": data_quality,
+            "n_features": features.shape[1],
             "model_versions": model_versions,
+            "model_identity": model_identity,
         }
 
         # ── Assemble ──────────────────────────────────────────────────

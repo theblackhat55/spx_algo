@@ -16,6 +16,7 @@ Usage: python scripts/retrain_full_stack.py [--dry-run]
 from __future__ import annotations
 
 import argparse
+import hashlib
 import copy
 import logging
 import sys
@@ -52,7 +53,8 @@ def main():
     # ── Load data ─────────────────────────────────────────────────────────
     from src.features.builder import load_feature_matrix
     from src.targets.engineer import engineer_targets, align_features_targets
-    from src.targets.splitter import WalkForwardSplitter, SplitConfig
+    from src.targets.splitter import WalkForwardSplitter
+    from src.training.config import PRODUCTION_SPLIT_CONFIG
     from src.models.trainer import Trainer
     from src.models.tree_models import (
         XGBoostModel, LightGBMModel, CatBoostModel,
@@ -67,7 +69,7 @@ def main():
     logger.info("Targets: %d rows, columns: %s", len(targets), list(targets.columns))
 
     # Splitter config matching production (265 folds)
-    split_cfg = SplitConfig(min_train_rows=756, test_rows=63, step_rows=21, gap_rows=1)
+    split_cfg = PRODUCTION_SPLIT_CONFIG
 
     # ── Define model zoo ──────────────────────────────────────────────────
     regressor_models = [
@@ -227,10 +229,84 @@ def main():
     print(f"\nAll metrics:")
     print(metrics_df.to_string(index=False))
 
+
+    _write_manifest(metrics_df, split_cfg, features)
+
     print(f"\nArtifacts in {MODEL_DIR}/:")
     for p in sorted(MODEL_DIR.glob("*.pkl")):
         size_kb = p.stat().st_size / 1024
         print(f"  {p.name:<50s} {size_kb:>8.0f} KB")
+
+
+def _sha256_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _write_manifest(metrics_df: pd.DataFrame, split_cfg, features: pd.DataFrame) -> None:
+    manifest_path = MODEL_DIR / "manifest.json"
+
+    def _best_for(label: str):
+        subset = metrics_df[metrics_df["target"] == label]
+        if subset.empty:
+            return None
+        best = subset.loc[subset["mae"].idxmin()]
+        artifact = MODEL_DIR / f"regressor_target_{label}_pct.pkl"
+        return {
+            "model": str(best["model"]),
+            "mae": float(best["mae"]),
+            "rmse": float(best["rmse"]),
+            "artifact": artifact.name,
+            "artifact_sha256": _sha256_file(artifact),
+        }
+
+    feature_cols = list(features.columns)
+    feature_hash = hashlib.sha256("\n".join(feature_cols).encode("utf-8")).hexdigest()
+
+    manifest = {
+        "trained_at": pd.Timestamp.utcnow().isoformat(),
+        "script": "scripts/retrain_full_stack.py",
+        "primary_high": _best_for("high"),
+        "primary_low": _best_for("low"),
+        "meta_high": {
+            "artifact": "meta_ridge_high.pkl",
+            "artifact_sha256": _sha256_file(MODEL_DIR / "meta_ridge_high.pkl"),
+        },
+        "meta_low": {
+            "artifact": "meta_ridge_low.pkl",
+            "artifact_sha256": _sha256_file(MODEL_DIR / "meta_ridge_low.pkl"),
+        },
+        "feature_matrix_rows": int(features.shape[0]),
+        "feature_matrix_cols": int(features.shape[1]),
+        "feature_matrix_end_date": str(features.index.max().date()) if len(features) else None,
+        "feature_columns_hash": feature_hash,
+        "feature_columns_count": len(feature_cols),
+        "split_config": {
+            "min_train_rows": split_cfg.min_train_rows,
+            "test_rows": split_cfg.test_rows,
+            "step_rows": split_cfg.step_rows,
+            "gap_rows": split_cfg.gap_rows,
+            "embargo_rows": split_cfg.embargo_rows,
+        },
+        "artifacts": {
+            p.name: {
+                "sha256": _sha256_file(p),
+                "size_bytes": p.stat().st_size,
+            }
+            for p in sorted(MODEL_DIR.glob("*.pkl"))
+        },
+    }
+
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        import json
+        json.dump(manifest, f, indent=2)
+
+    logger.info("Manifest written -> %s", manifest_path)
 
 
 if __name__ == "__main__":

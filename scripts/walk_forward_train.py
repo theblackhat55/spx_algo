@@ -68,7 +68,20 @@ def _parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _legacy_guard():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--allow-legacy-output", action="store_true")
+    args, _ = parser.parse_known_args()
+    if not args.allow_legacy_output:
+        raise SystemExit(
+            "walk_forward_train.py is deprecated for production artifact writes. "
+            "Use scripts/retrain_full_stack.py instead, or rerun with --allow-legacy-output "
+            "only for research/backtest purposes."
+        )
+
+
 def main() -> None:
+    _legacy_guard()
     args = _parse_args()
 
     import numpy as np
@@ -133,7 +146,7 @@ def main() -> None:
             logger.warning("Not enough data for fold %d — stopping early", fold + 1)
             break
 
-        X_train = X_full.iloc[:val_start]
+        X_train = X_full.iloc[:max(0, val_start - 5)]
         y_train = y_full.iloc[:val_start]
         X_val   = X_full.iloc[val_start:val_end]
         y_val   = y_full.iloc[val_start:val_end]
